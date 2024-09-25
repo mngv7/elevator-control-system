@@ -44,6 +44,62 @@ void handle_open(void)
     pthread_mutex_unlock(&ptr->mutex);
 }
 
+void handle_close(void)
+{
+    pthread_mutex_lock(&ptr->mutex);
+    ptr->close_button = 1;
+    pthread_cond_signal(&ptr->cond);
+
+    pthread_mutex_unlock(&ptr->mutex);
+}
+
+void handle_up(void)
+{
+    pthread_mutex_lock(&ptr->mutex);
+
+    if (!ptr->individual_service_mode)
+    {
+        printf("Operation only allowed in service mode.");
+        exit(1);
+    }
+
+    if (strcmp(ptr->status, status_names[3]))
+    {
+        printf("Operation not allowed while doors are open.");
+        exit(1);
+    }
+
+    if (strcmp(ptr->status, status_names[4]))
+    {
+        printf("Operation not allowed while elevator is moving.");
+        exit(1);
+    }
+
+    // TODO: Set the destination floor to +1 the current floor
+
+    pthread_mutex_unlock(&ptr->mutex);
+}
+
+void handle_stop(void)
+{
+    pthread_mutex_lock(&ptr->mutex);
+    ptr->emergency_stop = 1;
+    pthread_cond_signal(&ptr->cond);
+    pthread_mutex_unlock(&ptr->mutex);
+}
+
+void handle_service_on(void)
+{
+}
+
+void handle_service_off(void)
+{
+}
+
+void handle_down(void)
+{
+}
+
 int main(int argc, char **argv)
 {
     // Check the number of command line arguments.
@@ -72,43 +128,38 @@ int main(int argc, char **argv)
     char *operation;
     strcpy(operation, argv[2]);
 
-    if (!strcmp(operation, "up"))
-    {
-        pthread_mutex_lock(&ptr->mutex);
-
-        if (!ptr->individual_service_mode)
-        {
-            printf("Operation only allowed in service mode.");
-            exit(1);
-        }
-
-        if (strcmp(ptr->status, status_names[3]))
-        {
-            printf("Operation not allowed while doors are open.");
-            exit(1);
-        }
-
-        if (strcmp(ptr->status, status_names[4]))
-        {
-            printf("Operation not allowed while elevator is moving.");
-            exit(1);
-        }
-
-        // TODO: Set the destination floor to +1 the current floor
-
-        pthread_mutex_unlock(&ptr->mutex);
-    }
-    else if (!strcmp(operation, "open"))
+    if (!strcmp(operation, "open"))
     {
         handle_open();
     }
     else if (!strcmp(operation, "close"))
     {
-        pthread_mutex_lock(&ptr->mutex);
-        ptr->close_button = 1;
-        pthread_cond_signal(&ptr->cond);
-
-        pthread_mutex_unlock(&ptr->mutex);
+        handle_close();
+    }
+    else if (!strcmp(operation, "stop"))
+    {
+        handle_stop();
+    }
+    else if (!strcmp(operation, "service_on"))
+    {
+        handle_stop();
+    }
+    else if (!strcmp(operation, "service_off"))
+    {
+        handle_stop();
+    }
+    else if (!strcmp(operation, "up"))
+    {
+        handle_up();
+    }
+    else if (!strcmp(operation, "down"))
+    {
+        handle_stop();
+    }
+    else
+    {
+        printf("Invalid operation.\n");
+        exit(1);
     }
 
     return 0;
