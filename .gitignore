@@ -1,2 +1,2 @@
-# Ignore the executable file
-call
+# Ignore all executables (without extensions)
+*
