@@ -17,9 +17,11 @@ void send_looped(int fd, const void *buf, size_t sz)
     const char *ptr = buf;
     size_t remain = sz;
 
-    while (remain > 0) {
+    while (remain > 0)
+    {
         ssize_t sent = write(fd, ptr, remain);
-        if (sent == -1) {
+        if (sent == -1)
+        {
             perror("write()");
             exit(1);
         }
@@ -28,29 +30,96 @@ void send_looped(int fd, const void *buf, size_t sz)
     }
 }
 
-void send_message(int fd, const char *buf)
+void send_controller_message(int fd, const char *buf)
 {
     uint32_t len = htonl(strlen(buf));
     send_looped(fd, &len, sizeof(len));
     send_looped(fd, buf, strlen(buf));
 }
 
-int main (int argc, char **argv) 
+int main(int argc, char **argv)
 {
-if (argc != 3 ) {
-    printf("Usage: {source floor} {destination floor}\n");
-    exit(1);
-}
+    // Check the number of command line arguments.
+    if (argc != 3)
+    {
+        printf("Usage: {source floor} {destination floor}\n");
+        exit(1);
+    }
 
-char source_floor[4];
+    // Create a socket.
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
+    if (sockfd == -1)
+    {
+        perror("socket()");
+        exit(1);
+    }
 
-for (int i = 0; i < sizeof(argv[1])/4; i++) 
-{
-    source_floor[i] = argv[1][i];
-}
+    // Socket address setup
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(3000);
+    const char *ipaddress = "127.0.0.1";
 
-printf("%s", source_floor);
+    if (inet_pton(AF_INET, ipaddress, &addr.sin_addr) != 1)
+    {
+        fprintf(stderr, "inet_pton(%s)\n", ipaddress);
+        exit(EXIT_FAILURE);
+    }
 
-return 0;
+    // Establish connection
+    if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
+    {
+        printf("Unable to connect to elevator system.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // Read the command line arguments and store in corresponding strings.
+    char current_floor[4];
+    char destination_floor[4];
+
+    // Check length before copying
+    if (strlen(argv[1]) > 3 || strlen(argv[2]) > 3)
+    {
+        printf("Invalid floor(s) specified.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    strncpy(current_floor, argv[1], sizeof(current_floor) - 1);
+    current_floor[sizeof(current_floor) - 1] = '\0'; // Null-terminate
+
+    strncpy(destination_floor, argv[2], sizeof(destination_floor) - 1);
+    destination_floor[sizeof(destination_floor) - 1] = '\0'; // Null-terminate
+
+    if (strcmp(current_floor, destination_floor) == 0)
+    {
+        printf("You are already on that floor!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Current floor: %s\n", current_floor);
+    printf("Destination floor: %s\n", destination_floor);
+
+    // Send the message.
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "CALL %s %s", current_floor, destination_floor);
+    send_controller_message(sockfd, buf);
+    printf("Sent this msg to client: %s\n", buf);
+
+    // Shut down read and write on the socket.
+    if (shutdown(sockfd, SHUT_RDWR) == -1)
+    {
+        perror("shutdown()");
+        exit(1);
+    }
+
+    // Close the socket.
+    if (close(sockfd) == -1)
+    {
+        perror("close()");
+        exit(1);
+    }
+
+    return EXIT_SUCCESS;
 }
