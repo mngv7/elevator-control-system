@@ -90,14 +90,24 @@ void handle_stop(void)
 
 void handle_service_on(void)
 {
+    pthread_mutex_lock(&ptr->mutex);
+    ptr->individual_service_mode = 1;
+    ptr->emergency_mode = 0;
+    pthread_cond_signal(&ptr->cond);
+    pthread_mutex_unlock(&ptr->mutex);
 }
 
 void handle_service_off(void)
 {
+    pthread_mutex_lock(&ptr->mutex);
+    ptr->individual_service_mode = 0;
+    pthread_cond_signal(&ptr->cond);
+    pthread_mutex_unlock(&ptr->mutex);
 }
 
 void handle_down(void)
 {
+    // TODO: set the destination floor to -1 the current floor.
 }
 
 int main(int argc, char **argv)
