@@ -79,27 +79,20 @@ int main(int argc, char **argv)
     char current_floor[4];
     char destination_floor[4];
 
-    for (int i = 0; i < strlen(argv[1]); i++)
+    // Check length before copying
+    if (strlen(argv[1]) > 3 || strlen(argv[2]) > 3)
     {
-        if (strlen(argv[1]) > 3)
-        {
-            printf("Invalid floor(s) specified.\n");
-            exit(EXIT_FAILURE);
-        }
-        current_floor[i] = argv[1][i];
+        printf("Invalid floor(s) specified.\n");
+        exit(EXIT_FAILURE);
     }
 
-    for (int i = 0; i < strlen(argv[2]); i++)
-    {
-        if (strlen(argv[2]) > 3)
-        {
-            printf("Invalid floor(s) specified.\n");
-            exit(EXIT_FAILURE);
-        }
-        destination_floor[i] = argv[2][i];
-    }
+    strncpy(current_floor, argv[1], sizeof(current_floor) - 1);
+    current_floor[sizeof(current_floor) - 1] = '\0'; // Null-terminate
 
-    if (!strcmp(current_floor, destination_floor))
+    strncpy(destination_floor, argv[2], sizeof(destination_floor) - 1);
+    destination_floor[sizeof(destination_floor) - 1] = '\0'; // Null-terminate
+
+    if (strcmp(current_floor, destination_floor) == 0)
     {
         printf("You are already on that floor!\n");
         exit(EXIT_FAILURE);
@@ -110,7 +103,7 @@ int main(int argc, char **argv)
 
     // Send the message.
     char buf[1024];
-    fgets(buf, 1023, stdin);
+    snprintf(buf, sizeof(buf), "CALL %s %s", current_floor, destination_floor);
     send_controller_message(sockfd, buf);
     printf("Sent this msg to client: %s\n", buf);
 
