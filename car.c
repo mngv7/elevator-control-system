@@ -88,6 +88,14 @@ int main(int argc, char **argv)
     ptr->individual_service_mode = 0;
     ptr->emergency_mode = 0;
 
+    // Unmap the shared memory
+    munmap(ptr, sizeof(car_shared_mem));
+
+    // Close the file descriptor
     close(shm_fd);
+
+    // Optionally, remove the shared memory object (do this only in one process, typically the last one)
+    shm_unlink("/carA");
+
     return 0;
 }
