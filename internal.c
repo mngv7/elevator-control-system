@@ -11,6 +11,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>    // For O_* constants
+#include <sys/mman.h> // For mmap(), shm_open()
+#include <sys/stat.h> // For mode constants
+#include <unistd.h>   // For ftruncate(), close()
 
 int main(int argc, char **argv)
 {
@@ -20,4 +24,13 @@ int main(int argc, char **argv)
         printf("Usage: {car name} {operation}\n");
         exit(1);
     }
+
+    int shm_fd = shm_open(argv[1], O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1)
+    {
+        printf("Unable to access %s\n", argv[1]);
+        exit(1);
+    }
+
+    return 0;
 }
