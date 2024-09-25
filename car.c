@@ -13,9 +13,8 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 
-char* status_names[] = {
-    "Opening", "Open", "Closing", "Closed", "Between"
-};
+char *status_names[] = {
+    "Opening", "Open", "Closing", "Closed", "Between"};
 
 typedef struct
 {
@@ -64,8 +63,19 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    pthread_mutex_init(&ptr->mutex, NULL);
-    pthread_cond_init(&ptr->cond, NULL);
+    // Initialised the mutex.
+    pthread_mutexattr_t mutex_attr;
+    pthread_mutexattr_init(&mutex_attr);
+    pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&ptr->mutex, &mutex_attr);
+    pthread_mutexattr_destroy(&mutex_attr);
+
+    // Initialise the condition variable.
+    pthread_condattr_t cond_attr;
+    pthread_condattr_init(&cond_attr);
+    pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
+    pthread_cond_init(&ptr->cond, &cond_attr);
+    pthread_condattr_destroy(&cond_attr);
 
     strcpy(ptr->current_floor, argv[2]);
     strcpy(ptr->destination_floor, argv[2]);
