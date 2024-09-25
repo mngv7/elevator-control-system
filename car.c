@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <signal.h>
 
 char *status_names[] = {
     "Opening", "Open", "Closing", "Closed", "Between"};
@@ -32,6 +33,22 @@ typedef struct
     uint8_t emergency_mode;          // 1 if in emergency mode, else 0
 } car_shared_mem;
 
+int shm_fd = -1;
+car_shared_mem *ptr;  // Pointer to shared memory
+
+void terminate_shared_memory(int sig_num)
+{
+    signal(SIGINT, terminate_shared_memory);
+    // Unmap the shared memory
+    munmap(ptr, sizeof(car_shared_mem));
+
+    // Close the file descriptor
+    close(shm_fd);
+
+    shm_unlink("/carA");
+    exit(0);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 5)
@@ -40,10 +57,12 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+    signal(SIGINT, terminate_shared_memory);
+
     // Unlink the shared memory incase it exists.
     shm_unlink("/carA");
 
-    int shm_fd = shm_open(argv[1], O_CREAT | O_RDWR, 0666);
+    shm_fd = shm_open(argv[1], O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1)
     {
         perror("shm_open");
@@ -56,7 +75,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    car_shared_mem *ptr = mmap(0, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    ptr = mmap(0, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (ptr == MAP_FAILED)
     {
         perror("mmap");
@@ -88,14 +107,7 @@ int main(int argc, char **argv)
     ptr->individual_service_mode = 0;
     ptr->emergency_mode = 0;
 
-    // Unmap the shared memory
-    munmap(ptr, sizeof(car_shared_mem));
-
-    // Close the file descriptor
-    close(shm_fd);
-
-    // Optionally, remove the shared memory object (do this only in one process, typically the last one)
-    shm_unlink("/carA");
-
+    while (1)
+        ;
     return 0;
 }
