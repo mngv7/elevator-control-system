@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+#include <ctype.h>
 
 #define BUFFER_SIZE 1024
 
@@ -118,6 +119,50 @@ int establish_connection()
     return sockfd;
 }
 
+int is_input_valid(char *current_floor, char *destination_floor)
+{
+    int is_valid = 1;
+
+    if (strlen(current_floor) > 3 || strlen(destination_floor) > 3)
+    {
+        return 0;
+    }
+
+    if (isalpha(current_floor[0]))
+    {
+        if (current_floor[0] != 'B')
+        {
+            return 0;
+        }
+    }
+
+    for (int i = 1; i < strlen(current_floor); i++)
+    {
+        if (!isdigit(current_floor[i]))
+        {
+            return 0;
+        }
+    }
+
+    if (isalpha(destination_floor[0]))
+    {
+        if (destination_floor[0] != 'B')
+        {
+            return 0;
+        }
+    }
+
+    for (int i = 1; i < strlen(destination_floor); i++)
+    {
+        if (!isdigit(destination_floor[i]))
+        {
+            return 0;
+        }
+    }
+
+    return is_valid;
+}
+
 int main(int argc, char **argv)
 {
     // Check the number of command line arguments.
@@ -130,7 +175,7 @@ int main(int argc, char **argv)
     char current_floor[4];
     char destination_floor[4];
 
-    if (strlen(argv[1]) > 3 || strlen(argv[2]) > 3)
+    if (!is_input_valid(argv[1], argv[2]))
     {
         printf("Invalid floor(s) specified.\n");
         exit(EXIT_FAILURE);
@@ -138,7 +183,7 @@ int main(int argc, char **argv)
 
     strncpy(current_floor, argv[1], sizeof(current_floor) - 1);
     current_floor[sizeof(current_floor) - 1] = '\0'; // Null-terminate
-    
+
     strncpy(destination_floor, argv[2], sizeof(destination_floor) - 1);
     destination_floor[sizeof(destination_floor) - 1] = '\0'; // Null-terminate
 
