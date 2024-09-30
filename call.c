@@ -80,11 +80,16 @@ int main(int argc, char **argv)
 
     // Create a socket.
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-
     if (sockfd == -1)
     {
         perror("socket()");
         exit(EXIT_FAILURE);
+    }
+
+    int opt_enable = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt_enable, sizeof(opt_enable)) == -1) {
+        perror("setsockopt()");
+        exit(1);
     }
 
     // Socket address setup
