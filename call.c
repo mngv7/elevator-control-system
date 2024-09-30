@@ -37,6 +37,34 @@ void send_controller_message(int fd, const char *buf)
     send_looped(fd, buf, strlen(buf));
 }
 
+void recv_looped(int fd, void *buf, size_t sz)
+{
+    char *ptr = buf;
+    size_t remain = sz;
+
+    while (remain > 0) {
+        ssize_t received = read(fd, ptr, remain);
+        if (received == -1) {
+            perror("read()");
+            exit(1);
+        }
+        ptr += received;
+        remain -= received;
+    }
+}
+
+char *receive_msg(int fd)
+{
+    uint32_t nlen;
+    recv_looped(fd, &nlen, sizeof(nlen));
+    uint32_t len = ntohl(nlen);
+    
+    char *buf = malloc(len + 1);
+    buf[len] = '\0';
+    recv_looped(fd, buf, len);
+    return buf;
+}
+
 int main(int argc, char **argv)
 {
     // Check the number of command line arguments.
@@ -98,14 +126,14 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    printf("Current floor: %s\n", current_floor);
-    printf("Destination floor: %s\n", destination_floor);
+    // printf("Current floor: %s\n", current_floor);
+    // printf("Destination floor: %s\n", destination_floor);
 
     // Send the message.
     char buf[1024];
     snprintf(buf, sizeof(buf), "CALL %s %s", current_floor, destination_floor);
     send_controller_message(sockfd, buf);
-    printf("Sent this msg to client: %s\n", buf);
+    // printf("Sent this msg to client: %s\n", buf);
 
     // Shut down read and write on the socket.
     if (shutdown(sockfd, SHUT_RDWR) == -1)
