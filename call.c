@@ -12,6 +12,8 @@
 #include <unistd.h>
 #include <errno.h>
 
+#define BUFFER_SIZE 1024
+
 void send_looped(int fd, const void *buf, size_t sz)
 {
     const char *ptr = buf;
@@ -23,7 +25,7 @@ void send_looped(int fd, const void *buf, size_t sz)
         if (sent == -1)
         {
             perror("write()");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
         ptr += sent;
         remain -= sent;
@@ -42,11 +44,13 @@ void recv_looped(int fd, void *buf, size_t sz)
     char *ptr = buf;
     size_t remain = sz;
 
-    while (remain > 0) {
+    while (remain > 0)
+    {
         ssize_t received = read(fd, ptr, remain);
-        if (received == -1) {
+        if (received == -1)
+        {
             perror("read()");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
         ptr += received;
         remain -= received;
@@ -58,7 +62,7 @@ char *receive_msg(int fd)
     uint32_t nlen;
     recv_looped(fd, &nlen, sizeof(nlen));
     uint32_t len = ntohl(nlen);
-    
+
     char *buf = malloc(len + 1);
     buf[len] = '\0';
     recv_looped(fd, buf, len);
@@ -71,7 +75,7 @@ int main(int argc, char **argv)
     if (argc != 3)
     {
         printf("Usage: {source floor} {destination floor}\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     // Create a socket.
@@ -80,7 +84,7 @@ int main(int argc, char **argv)
     if (sockfd == -1)
     {
         perror("socket()");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     // Socket address setup
@@ -130,23 +134,54 @@ int main(int argc, char **argv)
     // printf("Destination floor: %s\n", destination_floor);
 
     // Send the message.
-    char buf[1024];
-    snprintf(buf, sizeof(buf), "CALL %s %s", current_floor, destination_floor);
-    send_controller_message(sockfd, buf);
+    char sendbuf[BUFFER_SIZE];
+    snprintf(sendbuf, sizeof(sendbuf), "CALL %s %s", current_floor, destination_floor);
+    send_controller_message(sockfd, sendbuf);
     // printf("Sent this msg to client: %s\n", buf);
+
+    char recv_buf[BUFFER_SIZE] = {0};
+    uint32_t len = 0;
+
+    recv_looped(sockfd, &len, sizeof(len));
+    len = ntohl(len); // Convert length from network to host byte order
+
+    // Then receive the actual message
+    if (!(len > 0 && len < BUFFER_SIZE))
+    {
+        perror("rcvoverflow");
+        exit(EXIT_FAILURE);
+    }
+
+    recv_looped(sockfd, recv_buf, len);
+    // printf("%s\n", recv_buf);
+
+    // Possible messages:
+    // CAR {car name}
+    // UNAVAILABLE
+
+    if (strcmp(recv_buf, "UNAVAIABLE") == 0)
+    {
+        printf("Sorry, no car is available to take this request.\n");
+        exit(EXIT_SUCCESS);
+    }
+    else
+    {
+        printf("Car Test is arriving.\n");
+        exit(EXIT_SUCCESS);
+    }
 
     // Shut down read and write on the socket.
     if (shutdown(sockfd, SHUT_RDWR) == -1)
     {
         perror("shutdown()");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     // Close the socket.
     if (close(sockfd) == -1)
     {
         perror("close()");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     return EXIT_SUCCESS;
