@@ -121,8 +121,6 @@ int establish_connection()
 
 int is_input_valid(char *current_floor, char *destination_floor)
 {
-    int is_valid = 1;
-
     if (strlen(current_floor) > 3 || strlen(destination_floor) > 3)
     {
         return 0;
@@ -160,7 +158,7 @@ int is_input_valid(char *current_floor, char *destination_floor)
         }
     }
 
-    return is_valid;
+    return 1;
 }
 
 int main(int argc, char **argv)
