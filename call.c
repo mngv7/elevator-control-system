@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -52,6 +50,12 @@ void recv_looped(int fd, void *buf, size_t sz)
             perror("read()");
             exit(EXIT_FAILURE);
         }
+        else if (received == 0)
+        {
+            // Server closed the connection
+            fprintf(stderr, "Server closed the connection unexpectedly.\n");
+            exit(EXIT_FAILURE);
+        }
         ptr += received;
         remain -= received;
     }
@@ -64,21 +68,19 @@ char *receive_msg(int fd)
     uint32_t len = ntohl(nlen);
 
     char *buf = malloc(len + 1);
-    buf[len] = '\0';
+    if (buf == NULL)
+    {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+    buf[len] = '\0'; // Null-terminate the string
     recv_looped(fd, buf, len);
     return buf;
 }
 
-int main(int argc, char **argv)
+int establish_connection()
 {
-    // Check the number of command line arguments.
-    if (argc != 3)
-    {
-        printf("Usage: {source floor} {destination floor}\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Create a socket.
+    // Create a new socket for each request.
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1)
     {
@@ -87,12 +89,13 @@ int main(int argc, char **argv)
     }
 
     int opt_enable = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt_enable, sizeof(opt_enable)) == -1) {
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt_enable, sizeof(opt_enable)) == -1)
+    {
         perror("setsockopt()");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    // Socket address setup
+    // Setup socket address for server connection.
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -105,18 +108,28 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    // Establish connection
+    // Establish the connection.
     if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
     {
         printf("Unable to connect to elevator system.\n");
         exit(EXIT_FAILURE);
     }
 
-    // Read the command line arguments and store in corresponding strings.
+    return sockfd;
+}
+
+int main(int argc, char **argv)
+{
+    // Check the number of command line arguments.
+    if (argc != 3)
+    {
+        printf("Usage: {source floor} {destination floor}\n");
+        exit(EXIT_FAILURE);
+    }
+
     char current_floor[4];
     char destination_floor[4];
 
-    // Check length before copying
     if (strlen(argv[1]) > 3 || strlen(argv[2]) > 3)
     {
         printf("Invalid floor(s) specified.\n");
@@ -125,7 +138,7 @@ int main(int argc, char **argv)
 
     strncpy(current_floor, argv[1], sizeof(current_floor) - 1);
     current_floor[sizeof(current_floor) - 1] = '\0'; // Null-terminate
-
+    
     strncpy(destination_floor, argv[2], sizeof(destination_floor) - 1);
     destination_floor[sizeof(destination_floor) - 1] = '\0'; // Null-terminate
 
@@ -135,16 +148,15 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    // printf("Current floor: %s\n", current_floor);
-    // printf("Destination floor: %s\n", destination_floor);
-
-    // Send the message.
+    // Establish connection and send the first message.
+    int sockfd = establish_connection();
     char sendbuf[BUFFER_SIZE];
     snprintf(sendbuf, sizeof(sendbuf), "CALL %s %s", current_floor, destination_floor);
     send_controller_message(sockfd, sendbuf);
-    // printf("Sent this msg to client: %s\n", buf);
 
+    // Receive the first response.
     char *msg = receive_msg(sockfd);
+    fflush(stdout);
 
     if (strcmp(msg, "UNAVAILABLE") == 0)
     {
@@ -156,17 +168,11 @@ int main(int argc, char **argv)
     }
     else
     {
-        printf("Unexpected response.\n");
+        printf("Unexpected response: %s\n", msg);
     }
+    free(msg);
 
-    // Shut down read and write on the socket.
-    if (shutdown(sockfd, SHUT_RDWR) == -1)
-    {
-        perror("shutdown()");
-        exit(EXIT_FAILURE);
-    }
-
-    // Close the socket.
+    // Close the first connection.
     if (close(sockfd) == -1)
     {
         perror("close()");
