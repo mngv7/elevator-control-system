@@ -139,35 +139,19 @@ int main(int argc, char **argv)
     send_controller_message(sockfd, sendbuf);
     // printf("Sent this msg to client: %s\n", buf);
 
-    char recv_buf[BUFFER_SIZE] = {0};
-    uint32_t len = 0;
+    char *msg = receive_msg(sockfd);
 
-    recv_looped(sockfd, &len, sizeof(len));
-    len = ntohl(len); // Convert length from network to host byte order
-
-    // Then receive the actual message
-    if (!(len > 0 && len < BUFFER_SIZE))
-    {
-        perror("rcvoverflow");
-        exit(EXIT_FAILURE);
-    }
-
-    recv_looped(sockfd, recv_buf, len);
-    // printf("%s\n", recv_buf);
-
-    // Possible messages:
-    // CAR {car name}
-    // UNAVAILABLE
-
-    if (strcmp(recv_buf, "UNAVAIABLE") == 0)
+    if (strcmp(msg, "UNAVAILABLE") == 0)
     {
         printf("Sorry, no car is available to take this request.\n");
-        exit(EXIT_SUCCESS);
+    }
+    else if (strncmp(msg, "CAR", 3) == 0)
+    {
+        printf("Car %s is arriving.\n", msg + 4);
     }
     else
     {
-        printf("Car Test is arriving.\n");
-        exit(EXIT_SUCCESS);
+        printf("Unexpected response.\n");
     }
 
     // Shut down read and write on the socket.
