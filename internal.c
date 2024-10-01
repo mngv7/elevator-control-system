@@ -65,7 +65,7 @@ void handle_up(void)
         exit(1);
     }
 
-    if (strcmp(ptr->status, status_names[3]))
+    if (strcmp(ptr->status, status_names[3]) != 0)
     {
         printf("Operation not allowed while doors are open.\n");
         pthread_mutex_unlock(&ptr->mutex);
@@ -73,7 +73,7 @@ void handle_up(void)
         exit(1);
     }
 
-    if (strcmp(ptr->status, status_names[4]))
+    if (strcmp(ptr->status, status_names[4]) == 0)
     {
         printf("Operation not allowed while elevator is moving.\n");
         pthread_mutex_unlock(&ptr->mutex);
@@ -94,6 +94,7 @@ void handle_up(void)
     pthread_mutex_unlock(&ptr->mutex);
 
     pthread_mutex_lock(&ptr->mutex);
+
     if (ptr->current_floor[0] == 'B')
     {
         char snum[12];
@@ -122,8 +123,38 @@ void handle_up(void)
 
         pthread_cond_signal(&ptr->cond);
         pthread_mutex_unlock(&ptr->mutex);
-        exit(1);
+        exit(EXIT_SUCCESS);
     }
+    else
+    {
+        int current_floor = atoi(ptr->current_floor);
+
+        // Ensure current_floor is within bounds
+        if (current_floor >= 999)
+        {
+            exit(EXIT_FAILURE); // Exit if the current floor is 999 or more
+        }
+
+        current_floor++; // Increment the floor
+
+        char temp_buffer[4]; // Temporary buffer to hold the string
+        int length = snprintf(temp_buffer, sizeof(temp_buffer), "%d", current_floor);
+
+        // Check if the length is greater than the destination buffer
+        if (length >= sizeof(ptr->destination_floor))
+        {
+            exit(EXIT_FAILURE); // Prevent overflow
+        }
+
+        strncpy(ptr->destination_floor, temp_buffer, sizeof(ptr->destination_floor));
+        ptr->destination_floor[sizeof(ptr->destination_floor) - 1] = '\0';
+
+        pthread_cond_signal(&ptr->cond);
+        pthread_mutex_unlock(&ptr->mutex);
+
+        exit(EXIT_SUCCESS);
+    }
+
     pthread_mutex_unlock(&ptr->mutex);
 }
 
@@ -139,7 +170,7 @@ void handle_down(void)
         exit(1);
     }
 
-    if (strcmp(ptr->status, status_names[3]))
+    if (strcmp(ptr->status, status_names[3]) != 0)
     {
         printf("Operation not allowed while doors are open.\n");
         pthread_mutex_unlock(&ptr->mutex);
@@ -147,7 +178,7 @@ void handle_down(void)
         exit(1);
     }
 
-    if (strcmp(ptr->status, status_names[4]))
+    if (strcmp(ptr->status, status_names[4]) == 0)
     {
         printf("Operation not allowed while elevator is moving.\n");
         pthread_mutex_unlock(&ptr->mutex);
@@ -157,6 +188,80 @@ void handle_down(void)
     pthread_mutex_unlock(&ptr->mutex);
 
     // TODO: Set the destination floor to +1 the current floor
+
+    pthread_mutex_lock(&ptr->mutex);
+    if (strcmp(ptr->current_floor, "1") == 0)
+    {
+        strcpy(ptr->destination_floor, "B1");
+
+        pthread_cond_signal(&ptr->cond);
+        pthread_mutex_unlock(&ptr->mutex);
+        exit(1);
+    }
+    pthread_mutex_unlock(&ptr->mutex);
+
+    pthread_mutex_lock(&ptr->mutex);
+
+    if (ptr->current_floor[0] == 'B')
+    {
+        char snum[12];
+        int j = 0;
+
+        // Extract number part from current_floor
+        for (int i = 1; ptr->current_floor[i] != '\0'; i++)
+        {
+            snum[j++] = ptr->current_floor[i];
+        }
+
+        snum[j] = '\0'; // Null-terminate the string
+
+        int num = atoi(snum);
+
+        if (num <= 99)
+        {
+            exit(EXIT_FAILURE);
+        }
+
+        num--;
+
+        sprintf(snum, "%d", num);
+
+        char new_destination_floor[4];
+        new_destination_floor[4] = '\0';
+
+        new_destination_floor[0] = 'B';
+
+        strncat(new_destination_floor, snum, 3);
+        strncpy(ptr->destination_floor, new_destination_floor, 3);
+
+        pthread_cond_signal(&ptr->cond);
+        pthread_mutex_unlock(&ptr->mutex);
+        exit(EXIT_SUCCESS);
+    }
+    else
+    {
+        int current_floor = atoi(ptr->current_floor);
+
+        current_floor--; // Increment the floor
+
+        char temp_buffer[4]; // Temporary buffer to hold the string
+        int length = snprintf(temp_buffer, sizeof(temp_buffer), "%d", current_floor);
+
+        // Check if the length is greater than the destination buffer
+        if (length >= sizeof(ptr->destination_floor))
+        {
+            exit(EXIT_FAILURE); // Prevent overflow
+        }
+
+        strncpy(ptr->destination_floor, temp_buffer, sizeof(ptr->destination_floor));
+        ptr->destination_floor[sizeof(ptr->destination_floor) - 1] = '\0';
+
+        pthread_cond_signal(&ptr->cond);
+        pthread_mutex_unlock(&ptr->mutex);
+
+        exit(EXIT_SUCCESS);
+    }
+    pthread_mutex_unlock(&ptr->mutex);
 }
 
 void handle_stop(void)
