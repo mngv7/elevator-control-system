@@ -14,8 +14,6 @@
 #include <fcntl.h>
 #include <signal.h>
 
-car_shared_mem *ptr;
-
 char *status_names[] = {
     "Opening", "Open", "Closing", "Closed", "Between"};
 
@@ -34,6 +32,8 @@ typedef struct
     uint8_t individual_service_mode;
     uint8_t emergency_mode;
 } car_shared_mem;
+
+car_shared_mem *ptr;
 
 void handle_open(void)
 {
@@ -59,25 +59,60 @@ void handle_up(void)
 
     if (!ptr->individual_service_mode)
     {
-        printf("Operation only allowed in service mode.");
+        printf("Operation only allowed in service mode.\n");
+        pthread_mutex_unlock(&ptr->mutex);
+
         exit(1);
     }
 
     if (strcmp(ptr->status, status_names[3]))
     {
-        printf("Operation not allowed while doors are open.");
+        printf("Operation not allowed while doors are open.\n");
+        pthread_mutex_unlock(&ptr->mutex);
+
         exit(1);
     }
 
     if (strcmp(ptr->status, status_names[4]))
     {
-        printf("Operation not allowed while elevator is moving.");
+        printf("Operation not allowed while elevator is moving.\n");
+        pthread_mutex_unlock(&ptr->mutex);
+
         exit(1);
     }
 
     // TODO: Set the destination floor to +1 the current floor
+}
 
-    pthread_mutex_unlock(&ptr->mutex);
+void handle_down(void)
+{
+    pthread_mutex_lock(&ptr->mutex);
+
+    if (!ptr->individual_service_mode)
+    {
+        printf("Operation only allowed in service mode.\n");
+        pthread_mutex_unlock(&ptr->mutex);
+
+        exit(1);
+    }
+
+    if (strcmp(ptr->status, status_names[3]))
+    {
+        printf("Operation not allowed while doors are open.\n");
+        pthread_mutex_unlock(&ptr->mutex);
+
+        exit(1);
+    }
+
+    if (strcmp(ptr->status, status_names[4]))
+    {
+        printf("Operation not allowed while elevator is moving.\n");
+        pthread_mutex_unlock(&ptr->mutex);
+
+        exit(1);
+    }
+
+    // TODO: Set the destination floor to +1 the current floor
 }
 
 void handle_stop(void)
@@ -105,11 +140,6 @@ void handle_service_off(void)
     pthread_mutex_unlock(&ptr->mutex);
 }
 
-void handle_down(void)
-{
-    // TODO: set the destination floor to -1 the current floor.
-}
-
 int main(int argc, char **argv)
 {
     // Check the number of command line arguments.
@@ -119,11 +149,15 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    int shm_fd = shm_open(argv[1], O_RDWR, 0666);
+    char car_name[100] = "/car";
+
+    strcat(car_name, argv[1]);
+
+    int shm_fd = shm_open(car_name, O_RDWR, 0666);
 
     if (shm_fd == -1)
     {
-        printf("Unable to access %s\n", argv[1]);
+        printf("Unable to access car %s.\n", argv[1]);
         exit(1);
     }
 
@@ -135,7 +169,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    char *operation;
+    char operation[11];
     strcpy(operation, argv[2]);
 
     if (!strcmp(operation, "open"))
