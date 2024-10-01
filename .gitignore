@@ -1,2 +1,5 @@
-# Ignore all executables (without extensions)
+# Ignore all files without extensions
 *
+
+# Don't ignore the Makefile
+!Makefile
