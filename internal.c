@@ -80,8 +80,51 @@ void handle_up(void)
 
         exit(1);
     }
+    pthread_mutex_unlock(&ptr->mutex);
 
-    // TODO: Set the destination floor to +1 the current floor
+    pthread_mutex_lock(&ptr->mutex);
+    if (strcmp(ptr->current_floor, "B1") == 0)
+    {
+        strcpy(ptr->destination_floor, "1");
+
+        pthread_cond_signal(&ptr->cond);
+        pthread_mutex_unlock(&ptr->mutex);
+        exit(1);
+    }
+    pthread_mutex_unlock(&ptr->mutex);
+
+    pthread_mutex_lock(&ptr->mutex);
+    if (ptr->current_floor[0] == 'B')
+    {
+        char snum[12];
+        int j = 0;
+
+        // Extract number part from current_floor
+        for (int i = 1; ptr->current_floor[i] != '\0'; i++)
+        {
+            snum[j++] = ptr->current_floor[i];
+        }
+
+        snum[j] = '\0'; // Null-terminate the string
+
+        int num = atoi(snum);
+        num++;
+
+        sprintf(snum, "%d", num);
+
+        char new_destination_floor[4];
+        new_destination_floor[4] = '\0';
+
+        new_destination_floor[0] = 'B';
+
+        strncat(new_destination_floor, snum, 3);
+        strncpy(ptr->destination_floor, new_destination_floor, 3);
+
+        pthread_cond_signal(&ptr->cond);
+        pthread_mutex_unlock(&ptr->mutex);
+        exit(1);
+    }
+    pthread_mutex_unlock(&ptr->mutex);
 }
 
 void handle_down(void)
@@ -111,6 +154,7 @@ void handle_down(void)
 
         exit(1);
     }
+    pthread_mutex_unlock(&ptr->mutex);
 
     // TODO: Set the destination floor to +1 the current floor
 }
@@ -186,11 +230,11 @@ int main(int argc, char **argv)
     }
     else if (!strcmp(operation, "service_on"))
     {
-        handle_stop();
+        handle_service_on();
     }
     else if (!strcmp(operation, "service_off"))
     {
-        handle_stop();
+        handle_service_off();
     }
     else if (!strcmp(operation, "up"))
     {
@@ -198,7 +242,7 @@ int main(int argc, char **argv)
     }
     else if (!strcmp(operation, "down"))
     {
-        handle_stop();
+        handle_down();
     }
     else
     {
