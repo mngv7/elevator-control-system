@@ -62,7 +62,7 @@ void recv_looped(int fd, void *buf, size_t sz)
     }
 }
 
-char *receive_msg(int fd)
+char *rcv_controller_message(int fd)
 {
     uint32_t nlen;
     recv_looped(fd, &nlen, sizeof(nlen));
@@ -119,45 +119,12 @@ int establish_connection()
     return sockfd;
 }
 
-int is_input_valid(char *current_floor, char *destination_floor)
-{
-    if (strlen(current_floor) > 3 || strlen(destination_floor) > 3)
-    {
-        return 0;
+int is_valid_floor(const char *floor) {
+    if (strlen(floor) > 3) return 0;
+    if (isalpha(floor[0]) && floor[0] != 'B') return 0;
+    for (int i = 1; i < strlen(floor); i++) {
+        if (!isdigit(floor[i])) return 0;
     }
-
-    if (isalpha(current_floor[0]))
-    {
-        if (current_floor[0] != 'B')
-        {
-            return 0;
-        }
-    }
-
-    for (int i = 1; i < strlen(current_floor); i++)
-    {
-        if (!isdigit(current_floor[i]))
-        {
-            return 0;
-        }
-    }
-
-    if (isalpha(destination_floor[0]))
-    {
-        if (destination_floor[0] != 'B')
-        {
-            return 0;
-        }
-    }
-
-    for (int i = 1; i < strlen(destination_floor); i++)
-    {
-        if (!isdigit(destination_floor[i]))
-        {
-            return 0;
-        }
-    }
-
     return 1;
 }
 
@@ -170,22 +137,12 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    char current_floor[4];
-    char destination_floor[4];
-
-    if (!is_input_valid(argv[1], argv[2]))
-    {
+    if (!is_valid_floor(argv[1]) || !is_valid_floor(argv[2])) {
         printf("Invalid floor(s) specified.\n");
         exit(EXIT_FAILURE);
     }
 
-    strncpy(current_floor, argv[1], sizeof(current_floor) - 1);
-    current_floor[sizeof(current_floor) - 1] = '\0'; // Null-terminate
-
-    strncpy(destination_floor, argv[2], sizeof(destination_floor) - 1);
-    destination_floor[sizeof(destination_floor) - 1] = '\0'; // Null-terminate
-
-    if (strcmp(current_floor, destination_floor) == 0)
+    if (strcmp(argv[1], argv[2]) == 0)
     {
         printf("You are already on that floor!\n");
         exit(EXIT_FAILURE);
@@ -194,11 +151,11 @@ int main(int argc, char **argv)
     // Establish connection and send the first message.
     int sockfd = establish_connection();
     char sendbuf[BUFFER_SIZE];
-    snprintf(sendbuf, sizeof(sendbuf), "CALL %s %s", current_floor, destination_floor);
+    snprintf(sendbuf, sizeof(sendbuf), "CALL %s %s", argv[1], argv[2]);
     send_controller_message(sockfd, sendbuf);
 
     // Receive the first response.
-    char *msg = receive_msg(sockfd);
+    char *msg = rcv_controller_message(sockfd);
     fflush(stdout);
 
     if (strcmp(msg, "UNAVAILABLE") == 0)
@@ -224,3 +181,4 @@ int main(int argc, char **argv)
 
     return EXIT_SUCCESS;
 }
+
