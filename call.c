@@ -119,11 +119,16 @@ int establish_connection()
     return sockfd;
 }
 
-int is_valid_floor(const char *floor) {
-    if (strlen(floor) > 3) return 0;
-    if (isalpha(floor[0]) && floor[0] != 'B') return 0;
-    for (int i = 1; i < strlen(floor); i++) {
-        if (!isdigit(floor[i])) return 0;
+int is_valid_floor(const char *floor)
+{
+    if (strlen(floor) > 3)
+        return 0;
+    if (isalpha(floor[0]) && floor[0] != 'B')
+        return 0;
+    for (int i = 1; i < strlen(floor); i++)
+    {
+        if (!isdigit(floor[i]))
+            return 0;
     }
     return 1;
 }
@@ -137,7 +142,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    if (!is_valid_floor(argv[1]) || !is_valid_floor(argv[2])) {
+    if (!is_valid_floor(argv[1]) || !is_valid_floor(argv[2]))
+    {
         printf("Invalid floor(s) specified.\n");
         exit(EXIT_FAILURE);
     }
@@ -181,4 +187,3 @@ int main(int argc, char **argv)
 
     return EXIT_SUCCESS;
 }
-

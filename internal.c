@@ -35,53 +35,42 @@ typedef struct
 
 car_shared_mem *ptr;
 
-void handle_open(void)
-{
-    pthread_mutex_lock(&ptr->mutex);
-    ptr->open_button = 1;
-    pthread_cond_signal(&ptr->cond);
-
-    pthread_mutex_unlock(&ptr->mutex);
-}
-
-void handle_close(void)
-{
-    pthread_mutex_lock(&ptr->mutex);
-    ptr->close_button = 1;
-    pthread_cond_signal(&ptr->cond);
-
-    pthread_mutex_unlock(&ptr->mutex);
-}
-
-void handle_up(void)
+void check_up_down_allowed()
 {
     pthread_mutex_lock(&ptr->mutex);
 
     if (!ptr->individual_service_mode)
     {
         printf("Operation only allowed in service mode.\n");
-        pthread_mutex_unlock(&ptr->mutex);
-
-        exit(1);
     }
-
-    if (strcmp(ptr->status, status_names[3]) != 0)
-    {
-        printf("Operation not allowed while doors are open.\n");
-        pthread_mutex_unlock(&ptr->mutex);
-
-        exit(1);
-    }
-
-    if (strcmp(ptr->status, status_names[4]) == 0)
+    else if (strcmp(ptr->status, status_names[4]) == 0)
     {
         printf("Operation not allowed while elevator is moving.\n");
-        pthread_mutex_unlock(&ptr->mutex);
-
-        exit(1);
     }
-    pthread_mutex_unlock(&ptr->mutex);
+    else if (strcmp(ptr->status, status_names[3]) != 0)
+    {
+        printf("Operation not allowed while doors are open.\n");
+    }
+    else
+    {
+        pthread_mutex_unlock(&ptr->mutex);
+        return; // Operation allowed, exit function early
+    }
 
+    pthread_mutex_unlock(&ptr->mutex);
+    exit(1); // Exit if any condition fails
+}
+
+void update_shared_mem(uint8_t *ptr_to_update, int new_val)
+{
+    pthread_mutex_lock(&ptr->mutex);
+    *ptr_to_update = new_val;
+    pthread_cond_signal(&ptr->cond);
+    pthread_mutex_unlock(&ptr->mutex);
+}
+
+void handle_up(void)
+{
     pthread_mutex_lock(&ptr->mutex);
     if (strcmp(ptr->current_floor, "B1") == 0)
     {
@@ -100,25 +89,16 @@ void handle_up(void)
         char snum[12];
         int j = 0;
 
-        // Extract number part from current_floor
         for (int i = 1; ptr->current_floor[i] != '\0'; i++)
         {
             snum[j++] = ptr->current_floor[i];
         }
 
-        snum[j] = '\0'; // Null-terminate the string
-
         int num = atoi(snum);
-        num++;
-
-        sprintf(snum, "%d", num);
+        num--;
 
         char new_destination_floor[4];
-        new_destination_floor[4] = '\0';
-
-        new_destination_floor[0] = 'B';
-
-        strncat(new_destination_floor, snum, 3);
+        snprintf(new_destination_floor, sizeof(new_destination_floor), "B%02d", num);
         strncpy(ptr->destination_floor, new_destination_floor, 3);
 
         pthread_cond_signal(&ptr->cond);
@@ -129,7 +109,6 @@ void handle_up(void)
     {
         int current_floor = atoi(ptr->current_floor);
 
-        // Ensure current_floor is within bounds
         if (current_floor >= 999)
         {
             exit(EXIT_FAILURE); // Exit if the current floor is 999 or more
@@ -140,7 +119,6 @@ void handle_up(void)
         char temp_buffer[4]; // Temporary buffer to hold the string
         int length = snprintf(temp_buffer, sizeof(temp_buffer), "%d", current_floor);
 
-        // Check if the length is greater than the destination buffer
         if (length >= sizeof(ptr->destination_floor))
         {
             exit(EXIT_FAILURE); // Prevent overflow
@@ -161,35 +139,6 @@ void handle_up(void)
 void handle_down(void)
 {
     pthread_mutex_lock(&ptr->mutex);
-
-    if (!ptr->individual_service_mode)
-    {
-        printf("Operation only allowed in service mode.\n");
-        pthread_mutex_unlock(&ptr->mutex);
-
-        exit(1);
-    }
-
-    if (strcmp(ptr->status, status_names[3]) != 0)
-    {
-        printf("Operation not allowed while doors are open.\n");
-        pthread_mutex_unlock(&ptr->mutex);
-
-        exit(1);
-    }
-
-    if (strcmp(ptr->status, status_names[4]) == 0)
-    {
-        printf("Operation not allowed while elevator is moving.\n");
-        pthread_mutex_unlock(&ptr->mutex);
-
-        exit(1);
-    }
-    pthread_mutex_unlock(&ptr->mutex);
-
-    // TODO: Set the destination floor to +1 the current floor
-
-    pthread_mutex_lock(&ptr->mutex);
     if (strcmp(ptr->current_floor, "1") == 0)
     {
         strcpy(ptr->destination_floor, "B1");
@@ -207,31 +156,23 @@ void handle_down(void)
         char snum[12];
         int j = 0;
 
-        // Extract number part from current_floor
         for (int i = 1; ptr->current_floor[i] != '\0'; i++)
         {
             snum[j++] = ptr->current_floor[i];
         }
 
-        snum[j] = '\0'; // Null-terminate the string
-
         int num = atoi(snum);
 
-        if (num <= 99)
+        if (num >= 99)
         {
+            pthread_mutex_unlock(&ptr->mutex);
             exit(EXIT_FAILURE);
         }
 
-        num--;
-
-        sprintf(snum, "%d", num);
+        num++;
 
         char new_destination_floor[4];
-        new_destination_floor[4] = '\0';
-
-        new_destination_floor[0] = 'B';
-
-        strncat(new_destination_floor, snum, 3);
+        snprintf(new_destination_floor, sizeof(new_destination_floor), "B%02d", num);
         strncpy(ptr->destination_floor, new_destination_floor, 3);
 
         pthread_cond_signal(&ptr->cond);
@@ -247,7 +188,6 @@ void handle_down(void)
         char temp_buffer[4]; // Temporary buffer to hold the string
         int length = snprintf(temp_buffer, sizeof(temp_buffer), "%d", current_floor);
 
-        // Check if the length is greater than the destination buffer
         if (length >= sizeof(ptr->destination_floor))
         {
             exit(EXIT_FAILURE); // Prevent overflow
@@ -264,34 +204,8 @@ void handle_down(void)
     pthread_mutex_unlock(&ptr->mutex);
 }
 
-void handle_stop(void)
-{
-    pthread_mutex_lock(&ptr->mutex);
-    ptr->emergency_stop = 1;
-    pthread_cond_signal(&ptr->cond);
-    pthread_mutex_unlock(&ptr->mutex);
-}
-
-void handle_service_on(void)
-{
-    pthread_mutex_lock(&ptr->mutex);
-    ptr->individual_service_mode = 1;
-    ptr->emergency_mode = 0;
-    pthread_cond_signal(&ptr->cond);
-    pthread_mutex_unlock(&ptr->mutex);
-}
-
-void handle_service_off(void)
-{
-    pthread_mutex_lock(&ptr->mutex);
-    ptr->individual_service_mode = 0;
-    pthread_cond_signal(&ptr->cond);
-    pthread_mutex_unlock(&ptr->mutex);
-}
-
 int main(int argc, char **argv)
 {
-    // Check the number of command line arguments.
     if (argc != 3)
     {
         printf("Usage: {car name} {operation}\n");
@@ -318,35 +232,35 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    char operation[11];
-    strcpy(operation, argv[2]);
-
-    if (!strcmp(operation, "open"))
+    if (!strcmp(argv[2], "open"))
     {
-        handle_open();
+        update_shared_mem(&ptr->open_button, 1);
     }
-    else if (!strcmp(operation, "close"))
+    else if (!strcmp(argv[2], "close"))
     {
-        handle_close();
+        update_shared_mem(&ptr->close_button, 1);
     }
-    else if (!strcmp(operation, "stop"))
+    else if (!strcmp(argv[2], "stop"))
     {
-        handle_stop();
+        update_shared_mem(&ptr->emergency_stop, 1);
     }
-    else if (!strcmp(operation, "service_on"))
+    else if (!strcmp(argv[2], "service_on"))
     {
-        handle_service_on();
+        update_shared_mem(&ptr->individual_service_mode, 1);
+        ptr->emergency_mode = 0;
     }
-    else if (!strcmp(operation, "service_off"))
+    else if (!strcmp(argv[2], "service_off"))
     {
-        handle_service_off();
+        update_shared_mem(&ptr->individual_service_mode, 0);
     }
-    else if (!strcmp(operation, "up"))
+    else if (!strcmp(argv[2], "up"))
     {
+        check_up_down_allowed();
         handle_up();
     }
-    else if (!strcmp(operation, "down"))
+    else if (!strcmp(argv[2], "down"))
     {
+        check_up_down_allowed();
         handle_down();
     }
     else
