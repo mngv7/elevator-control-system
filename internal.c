@@ -69,139 +69,48 @@ void update_shared_mem(uint8_t *ptr_to_update, int new_val)
     pthread_mutex_unlock(&ptr->mutex);
 }
 
-void handle_up(void)
+void handle_floor_change(int direction)
 {
     pthread_mutex_lock(&ptr->mutex);
-    if (strcmp(ptr->current_floor, "B1") == 0)
+
+    int current_floor = atoi(ptr->current_floor);
+    if (ptr->current_floor[0] == 'B') // Handling basement floors
     {
-        strcpy(ptr->destination_floor, "1");
-
-        pthread_cond_signal(&ptr->cond);
-        pthread_mutex_unlock(&ptr->mutex);
-        exit(1);
-    }
-    pthread_mutex_unlock(&ptr->mutex);
-
-    pthread_mutex_lock(&ptr->mutex);
-
-    if (ptr->current_floor[0] == 'B')
-    {
-        char snum[12];
-        int j = 0;
-
-        for (int i = 1; ptr->current_floor[i] != '\0'; i++)
+        current_floor = atoi(ptr->current_floor + 1); // Skip the first character
+        if (direction == 1)
         {
-            snum[j++] = ptr->current_floor[i];
+            current_floor--;
         }
-
-        int num = atoi(snum);
-        num--;
-
-        char new_destination_floor[4];
-        snprintf(new_destination_floor, sizeof(new_destination_floor), "B%02d", num);
-        strncpy(ptr->destination_floor, new_destination_floor, 3);
-
-        pthread_cond_signal(&ptr->cond);
-        pthread_mutex_unlock(&ptr->mutex);
-        exit(EXIT_SUCCESS);
+        else
+        {
+            current_floor++;
+        }
+        snprintf(ptr->destination_floor, 4, "B%02d", current_floor);
     }
     else
     {
-        int current_floor = atoi(ptr->current_floor);
-
-        if (current_floor >= 999)
+        if (direction == 1)
         {
-            exit(EXIT_FAILURE); // Exit if the current floor is 999 or more
+            current_floor++;
+        }
+        else
+        {
+            current_floor--;
         }
 
-        current_floor++; // Increment the floor
-
-        char temp_buffer[4]; // Temporary buffer to hold the string
-        int length = snprintf(temp_buffer, sizeof(temp_buffer), "%d", current_floor);
-
-        if (length >= sizeof(ptr->destination_floor))
+        if (current_floor <= 0)
         {
-            exit(EXIT_FAILURE); // Prevent overflow
+            snprintf(ptr->destination_floor, 4, "B1");
         }
-
-        strncpy(ptr->destination_floor, temp_buffer, sizeof(ptr->destination_floor));
-        ptr->destination_floor[sizeof(ptr->destination_floor) - 1] = '\0';
-
-        pthread_cond_signal(&ptr->cond);
-        pthread_mutex_unlock(&ptr->mutex);
-
-        exit(EXIT_SUCCESS);
+        else
+        {
+            snprintf(ptr->destination_floor, 4, "%d", current_floor);
+        }
     }
 
+    pthread_cond_signal(&ptr->cond);
     pthread_mutex_unlock(&ptr->mutex);
-}
-
-void handle_down(void)
-{
-    pthread_mutex_lock(&ptr->mutex);
-    if (strcmp(ptr->current_floor, "1") == 0)
-    {
-        strcpy(ptr->destination_floor, "B1");
-
-        pthread_cond_signal(&ptr->cond);
-        pthread_mutex_unlock(&ptr->mutex);
-        exit(1);
-    }
-    pthread_mutex_unlock(&ptr->mutex);
-
-    pthread_mutex_lock(&ptr->mutex);
-
-    if (ptr->current_floor[0] == 'B')
-    {
-        char snum[12];
-        int j = 0;
-
-        for (int i = 1; ptr->current_floor[i] != '\0'; i++)
-        {
-            snum[j++] = ptr->current_floor[i];
-        }
-
-        int num = atoi(snum);
-
-        if (num >= 99)
-        {
-            pthread_mutex_unlock(&ptr->mutex);
-            exit(EXIT_FAILURE);
-        }
-
-        num++;
-
-        char new_destination_floor[4];
-        snprintf(new_destination_floor, sizeof(new_destination_floor), "B%02d", num);
-        strncpy(ptr->destination_floor, new_destination_floor, 3);
-
-        pthread_cond_signal(&ptr->cond);
-        pthread_mutex_unlock(&ptr->mutex);
-        exit(EXIT_SUCCESS);
-    }
-    else
-    {
-        int current_floor = atoi(ptr->current_floor);
-
-        current_floor--; // Increment the floor
-
-        char temp_buffer[4]; // Temporary buffer to hold the string
-        int length = snprintf(temp_buffer, sizeof(temp_buffer), "%d", current_floor);
-
-        if (length >= sizeof(ptr->destination_floor))
-        {
-            exit(EXIT_FAILURE); // Prevent overflow
-        }
-
-        strncpy(ptr->destination_floor, temp_buffer, sizeof(ptr->destination_floor));
-        ptr->destination_floor[sizeof(ptr->destination_floor) - 1] = '\0';
-
-        pthread_cond_signal(&ptr->cond);
-        pthread_mutex_unlock(&ptr->mutex);
-
-        exit(EXIT_SUCCESS);
-    }
-    pthread_mutex_unlock(&ptr->mutex);
+    exit(0);
 }
 
 int main(int argc, char **argv)
@@ -256,12 +165,12 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[2], "up"))
     {
         check_up_down_allowed();
-        handle_up();
+        handle_floor_change(1);
     }
     else if (!strcmp(argv[2], "down"))
     {
         check_up_down_allowed();
-        handle_down();
+        handle_floor_change(-1);
     }
     else
     {
