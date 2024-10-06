@@ -104,6 +104,10 @@ void handle_floor_change(int direction)
         }
         else
         {
+            if (current_floor > 999)
+            {
+                current_floor = 999;
+            }
             snprintf(ptr->destination_floor, 4, "%d", current_floor);
         }
     }
