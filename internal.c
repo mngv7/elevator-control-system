@@ -74,12 +74,20 @@ void handle_floor_change(int direction)
     pthread_mutex_lock(&ptr->mutex);
 
     int current_floor = atoi(ptr->current_floor);
+
     if (ptr->current_floor[0] == 'B') // Handling basement floors
     {
         current_floor = atoi(ptr->current_floor + 1); // Skip the first character
         if (direction == 1)
         {
-            current_floor--;
+            if (strcmp(ptr->current_floor, "B1") == 0)
+            {
+                strcpy(ptr->destination_floor, "1");
+            }
+            else
+            {
+                current_floor--;
+            }
         }
         else
         {
@@ -89,7 +97,7 @@ void handle_floor_change(int direction)
     }
     else
     {
-        if (direction == 1)
+        if (direction == 1) // Going up
         {
             current_floor++;
         }
