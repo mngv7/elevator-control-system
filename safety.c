@@ -14,9 +14,8 @@
 #include <fcntl.h>
 #include <signal.h>
 
-void *wait_for_signal_thread(void *ptr);
-void *update_shared_mem_thread(void *ptr);
 void custom_print(const char *str);
+int string_compare(const char *str1, const char *str2);
 
 typedef struct
 {
@@ -36,14 +35,11 @@ typedef struct
 
 int main(int argc, char **argv)
 {
-    pthread_t consumer;
-    pthread_t producer;
-
     car_shared_mem *ptr;
 
     if (argc != 2)
     {
-        printf("Usage: {car name}\n");
+        custom_print("Usage: {car name}\n");
         return 1;
     }
 
@@ -58,7 +54,9 @@ int main(int argc, char **argv)
 
     if (shm_fd == -1)
     {
-        printf("Unable to access car %s\n", argv[1]);
+        custom_print("Unable to access car ");
+        custom_print(argv[1]);
+        custom_print(".\n");
         return 1;
     }
 
@@ -66,74 +64,40 @@ int main(int argc, char **argv)
 
     if (ptr == MAP_FAILED)
     {
-        perror("mmap");
-        exit(1);
-    }
-
-    pthread_create(&consumer, NULL, wait_for_signal_thread, ptr);
-    pthread_create(&producer, NULL, update_shared_mem_thread, ptr);
-
-    if (pthread_join(consumer, NULL) != 0)
-    {
-        printf("pthread join fail.\n");
         return 1;
     }
 
-    if (pthread_join(producer, NULL) != 0)
+    while (1)
     {
-        printf("pthread join fail.\n");
-        return 1;
+        // Lock the shared memory structure
+        pthread_mutex_lock(&ptr->mutex);
+
+        // Wait for the condition variable to be signaled
+        pthread_cond_wait(&ptr->cond, &ptr->mutex);
+
+        // Update shared memory based on conditions
+        if ((ptr->door_obstruction == 1) && (string_compare(ptr->status, "Closing") == 1))
+        {
+            strcpy(ptr->status, "Opening");
+        }
+
+        if ((ptr->emergency_stop == 1) && (ptr->emergency_mode == 0))
+        {
+            custom_print("The emergency stop button has been pressed!\n");
+            ptr->emergency_mode = 1;
+        }
+
+        if (ptr->overload == 1 && ptr->emergency_mode == 0)
+        {
+            custom_print("The overload sensor has been tripped!\n");
+            ptr->emergency_mode = 1;
+        }
+
+        // Unlock the shared memory structure
+        pthread_mutex_unlock(&ptr->mutex);
     }
 
     return 0;
-}
-
-void *wait_for_signal_thread(void *ptr)
-{
-    car_shared_mem *shared_mem = (car_shared_mem *)ptr;
-
-    while (1)
-    {
-        pthread_mutex_lock(&shared_mem->mutex);
-
-        // Wait for the condition signal
-        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
-
-        pthread_mutex_unlock(&shared_mem->mutex);
-
-        usleep(100000); // Sleep for 100ms
-    }
-
-    return NULL;
-}
-
-void *update_shared_mem_thread(void *ptr)
-{
-    car_shared_mem *shared_mem = (car_shared_mem *)ptr;
-
-    while (1)
-    {
-        pthread_mutex_lock(&shared_mem->mutex);
-
-        if (shared_mem->door_obstruction == 1 && strcmp(shared_mem->status, "Closing") == 0)
-        {
-            strcpy(shared_mem->status, "Opening");
-        }
-
-        if ((shared_mem->emergency_stop == 1) && (shared_mem->emergency_mode == 0))
-        {
-            custom_print("The emergency stop button has been pressed!\n");
-        }
-
-        pthread_mutex_unlock(&shared_mem->mutex);
-
-        // Signal the condition variable to wake up the other thread
-        pthread_cond_signal(&shared_mem->cond);
-
-        usleep(100000); // Sleep for 100ms
-    }
-
-    return NULL;
 }
 
 void custom_print(const char *str)
@@ -148,4 +112,30 @@ void custom_print(const char *str)
             perror("write error");
         }
     }
+}
+
+int string_compare(const char *str1, const char *str2)
+{
+    if (str1 == NULL || str2 == NULL)
+    {
+        return -1;
+    }
+
+    size_t len1 = strlen(str1);
+    size_t len2 = strlen(str2);
+
+    if (len1 != len2)
+    {
+        return 0;
+    }
+
+    for (int i = 0; i < len1; i++)
+    {
+        if (str1[i] != str2[i])
+        {
+            return 0;
+        }
+    }
+
+    return 1;
 }
