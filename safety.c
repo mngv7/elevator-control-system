@@ -99,16 +99,6 @@ int main(int argc, char **argv)
 
         if (check_data_consistency(ptr) == 0)
         {
-            // Emergency mode is not 1:
-            // current_floor or destination_floor is not valid
-            // or
-            // Status is not one of the 5 valid statuses
-            // or
-            // Any of the uint8_t fields contain something other than 0 or 1.
-            // or
-            // Door obstruction is 1 and status is not either Opening or Closing
-            // Print a message to inform the operator
-            // Put car into emergency mode
             custom_print("Data consistency error!\n");
             ptr->emergency_mode = 1;
         }
@@ -185,16 +175,20 @@ int check_data_consistency(car_shared_mem *shared_mem)
             return 0;
         }
 
+        int is_valid_status = 0;
+
         for (int i = 0; i < 5; i++)
         {
-            int is_valid_status = 0;
 
             if (string_compare(shared_mem->status, status_names[i]) == 1)
             {
                 is_valid_status = 1;
             }
+        }
 
-            return is_valid_status;
+        if (is_valid_status == 0)
+        {
+            return 0;
         }
 
         if (shared_mem->open_button > 1 || shared_mem->close_button > 1 ||
@@ -205,9 +199,11 @@ int check_data_consistency(car_shared_mem *shared_mem)
             return 0;
         }
 
+
         if (shared_mem->door_obstruction == 1)
         {
-            if (!(string_compare(shared_mem->status, "Opening") == 1) || !(string_compare(shared_mem->status, "Closing") == 1))
+            if (!(string_compare(shared_mem->status, "Opening") == 1 || 
+                  string_compare(shared_mem->status, "Closing") == 1))
             {
                 return 0;
             }
