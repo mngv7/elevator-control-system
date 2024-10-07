@@ -168,7 +168,7 @@ int check_data_consistency(car_shared_mem *shared_mem)
     char *status_names[] = {
         "Opening", "Open", "Closing", "Closed", "Between"};
 
-    if (shared_mem->emergency_mode == 0)
+    if (shared_mem->emergency_mode != 1)
     {
         if (!is_valid_floor(shared_mem->current_floor) || !is_valid_floor(shared_mem->destination_floor))
         {
