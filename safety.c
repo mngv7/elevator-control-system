@@ -95,7 +95,7 @@ int main(int argc, char **argv)
             break;
         }
 
-        if ((ptr->door_obstruction == 1U) && (string_compare(ptr->status, "Closing") == 1))
+        if ((ptr->door_obstruction == 1U) && (string_compare(ptr->status, "Closing") == 0))
         {
             (void)strncpy(ptr->status, "Opening", STATUS_LENGTH - 1U);
             ptr->status[STATUS_LENGTH - 1U] = '\0';
@@ -151,23 +151,13 @@ int string_compare(const char *str1, const char *str2)
         return -1;
     }
 
-    size_t len1 = strlen(str1);
-    size_t len2 = strlen(str2);
-
-    if (len1 != len2)
+    while (*str1 != '\0' && *str2 != '\0' && *str1 == *str2)
     {
-        return 0;
+        str1++;
+        str2++;
     }
-
-    for (size_t i = 0; i < len1; i++)
-    {
-        if (str1[i] != str2[i])
-        {
-            return 0;
-        }
-    }
-
-    return 1;
+    
+    return *str1 - *str2;
 }
 
 int is_valid_floor(const char *floor)
@@ -209,7 +199,7 @@ int check_data_consistency(const car_shared_mem *shared_mem)
 
         for (size_t i = 0U; i < 5U; i++)
         {
-            if (string_compare(shared_mem->status, status_names[i]) == 1)
+            if (string_compare(shared_mem->status, status_names[i]) == 0)
             {
                 is_valid_status = 1;
             }
@@ -230,8 +220,8 @@ int check_data_consistency(const car_shared_mem *shared_mem)
 
         if (shared_mem->door_obstruction == 1U)
         {
-            if (!(string_compare(shared_mem->status, "Opening") == 1 ||
-                  string_compare(shared_mem->status, "Closing") == 1))
+            if (!(string_compare(shared_mem->status, "Opening") == 0 ||
+                  string_compare(shared_mem->status, "Closing") == 0))
             {
                 return 0;
             }
