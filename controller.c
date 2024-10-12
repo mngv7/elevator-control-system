@@ -13,20 +13,6 @@
 #include <errno.h>
 #include <pthread.h>
 
-// Create a new socket for every car.
-// Create a new thread for every car.
-
-// Upon connecting to the controlle, the car will send a prefixed message:
-// CAR {name} {lowest floor} {highest floor}
-
-// Upon initialisation, or value changes, or every delay ms passed,
-// the controller will receive a status message:
-// STATUS {status} {current floor} {destination floor}
-// The controller needs to keep track of this.
-
-// The controller will receive messages from the call pad in the format:
-// CALL {source floor} {destination floor}
-
 typedef struct
 {
     int car_fd;
@@ -67,6 +53,7 @@ void add_car_to_list(car_information new_car);
 void update_car_values(int car_clientfd, char *status, char *current_floor, char *destination_floor);
 void send_looped(int fd, const void *buf, size_t sz);
 void send_message(int fd, const char *buf);
+void print_car_list();
 
 int main()
 {
@@ -121,7 +108,6 @@ int main()
 
         if (strncmp(msg, "CAR", 3) == 0)
         {
-
             car_information new_car;
 
             int *car_clientfd = malloc(sizeof(int));
@@ -131,7 +117,6 @@ int main()
             new_car.car_fd = clientfd;
 
             add_car_to_list(new_car);
-
             pthread_t car_thread;
             if (pthread_create(&car_thread, NULL, handle_car, car_clientfd) != 0)
             {
@@ -140,11 +125,6 @@ int main()
             }
 
             // Detach the thread so that its resources are automatically freed when it terminates
-            if (pthread_detach(car_thread) != 0)
-            {
-                perror("pthread_detach()");
-                exit(1);
-            }
         }
         else if (strncmp(msg, "CALL", 4) == 0)
         {
@@ -157,41 +137,33 @@ int main()
             }
 
             sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
-
-            // printf("Source floor: %s\n", source_floor);
-            // printf("Destination floor: %s\n", destination_floor);
         }
 
         free(msg);
-
-        if (shutdown(clientfd, SHUT_RDWR) == -1)
-        {
-            perror("shutdown()");
-            exit(1);
-        }
-        if (close(clientfd) == -1)
-        {
-            perror("close()");
-            exit(1);
-        }
     }
 }
 
 void *handle_car(void *arg)
 {
-    int car_clientfd = atoi(arg);
-    free(arg);
+    int car_clientfd = *((int *)arg); // Dereference the pointer correctly
+    free(arg);                        // Free the dynamically allocated memory after dereferencing
+
+    if (pthread_detach(pthread_self()) != 0)
+    {
+        perror("pthread_detach()");
+        exit(1);
+    }
 
     while (1)
     {
+        // The following message is never received.
         char *msg = receive_msg(car_clientfd);
-        
         if (msg == NULL)
         {
             break;
         }
 
-        if (strncmp(msg, "STATUS", 4))
+        if (strncmp(msg, "STATUS", 6) == 0)
         {
             char status[8];
             char current_floor[4];
@@ -349,4 +321,17 @@ void send_message(int fd, const char *buf)
     uint32_t len = htonl(strlen(buf));
     send_looped(fd, &len, sizeof(len));
     send_looped(fd, buf, strlen(buf));
+}
+
+void print_car_list()
+{
+    pthread_mutex_lock(&list_mutex);
+    for (CarNode *curr = car_list_head; curr != NULL; curr = curr->next)
+    {
+        printf("Car Name: %s, Lowest Floor: %s, Highest Floor: %s\n",
+               curr->car_info.name,
+               curr->car_info.lowest_floor,
+               curr->car_info.highest_floor);
+    }
+    pthread_mutex_unlock(&list_mutex);
 }
