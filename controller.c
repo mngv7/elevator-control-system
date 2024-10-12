@@ -179,12 +179,11 @@ int main()
 
 void *handle_car(void *arg)
 {
-    int car_clientfd = *((int *)arg);
+    int car_clientfd = atoi(arg);
     free(arg);
 
     while (1)
     {
-        // Error is occuring on the following line:
         char *msg = receive_msg(car_clientfd);
 
         if (msg == NULL)
@@ -235,9 +234,11 @@ void recv_looped(int fd, void *buf, size_t sz)
     char *ptr = buf;
     size_t remain = sz;
 
-    while (remain > 0) {
+    while (remain > 0)
+    {
         ssize_t received = read(fd, ptr, remain);
-        if (received == -1) {
+        if (received == -1)
+        {
             perror("read()");
             exit(1);
         }
@@ -251,7 +252,7 @@ char *receive_msg(int fd)
     uint32_t nlen;
     recv_looped(fd, &nlen, sizeof(nlen));
     uint32_t len = ntohl(nlen);
-    
+
     char *buf = malloc(len + 1);
     buf[len] = '\0';
     recv_looped(fd, buf, len);
@@ -309,31 +310,19 @@ void remove_car_from_list(int car_fd)
     pthread_mutex_unlock(&list_mutex);
 }
 
-void update_car_values(int car_clientfd, char *status, char *current_floor, char *destination_floor)
+void update_car_values(int car_fd, char *status, char *current_floor, char *destination_floor)
 {
     pthread_mutex_lock(&list_mutex);
-
-    CarNode *current = car_list_head;
-
-    while (current != NULL)
+    for (CarNode *curr = car_list_head; curr; curr = curr->next)
     {
-        // Compare the client file descriptor
-        if (current->car_info.car_fd == car_clientfd)
+        if (curr->car_info.car_fd == car_fd)
         {
-            // Update the car's status and floors
-            strncpy(current->car_info.status, status, sizeof(current->car_info.status) - 1);
-            strncpy(current->car_info.current_floor, current_floor, sizeof(current->car_info.current_floor) - 1);
-            strncpy(current->car_info.destination_floor, destination_floor, sizeof(current->car_info.destination_floor) - 1);
-
-            // Ensure the strings are null-terminated
-            current->car_info.status[sizeof(current->car_info.status) - 1] = '\0';
-            current->car_info.current_floor[sizeof(current->car_info.current_floor) - 1] = '\0';
-            current->car_info.destination_floor[sizeof(current->car_info.destination_floor) - 1] = '\0';
-            break; // Exit loop once the car is found and updated
+            strncpy(curr->car_info.status, status, sizeof(curr->car_info.status));
+            strncpy(curr->car_info.current_floor, current_floor, sizeof(curr->car_info.current_floor));
+            strncpy(curr->car_info.destination_floor, destination_floor, sizeof(curr->car_info.destination_floor));
+            break;
         }
-        current = current->next;
     }
-
     pthread_mutex_unlock(&list_mutex);
 }
 

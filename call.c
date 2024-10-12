@@ -164,7 +164,7 @@ int main(int argc, char **argv)
     char *msg = rcv_controller_message(sockfd);
     fflush(stdout);
 
-    if (strcmp(msg, "UNAVAILABLE") == 0)
+    if (strncmp(msg, "UNAVAILABLE", 11) == 0)
     {
         printf("Sorry, no car is available to take this request.\n");
     }
