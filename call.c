@@ -31,7 +31,7 @@ void send_looped(int fd, const void *buf, size_t sz)
     }
 }
 
-void send_controller_message(int fd, const char *buf)
+void send_message(int fd, const char *buf)
 {
     uint32_t len = htonl(strlen(buf));
     send_looped(fd, &len, sizeof(len));
@@ -158,7 +158,7 @@ int main(int argc, char **argv)
     int sockfd = establish_connection();
     char sendbuf[BUFFER_SIZE];
     snprintf(sendbuf, sizeof(sendbuf), "CALL %s %s", argv[1], argv[2]);
-    send_controller_message(sockfd, sendbuf);
+    send_message(sockfd, sendbuf);
 
     // Receive the first response.
     char *msg = rcv_controller_message(sockfd);

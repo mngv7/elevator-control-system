@@ -61,9 +61,12 @@ CarNode *car_list_head = NULL;
 void recv_looped(int fd, void *buf, size_t sz);
 char *receive_msg(int fd);
 void *handle_car(void *arg);
+void *handle_call(void *arg);
 void remove_car_from_list(int car_fd);
 void add_car_to_list(car_information new_car);
 void update_car_values(int car_clientfd, char *status, char *current_floor, char *destination_floor);
+void send_looped(int fd, const void *buf, size_t sz);
+void send_message(int fd, const char *buf);
 
 int main()
 {
@@ -114,8 +117,16 @@ int main()
 
         if (strncmp(msg, "CAR", 3) == 0)
         {
+
+            car_information new_car;
+
             int *car_clientfd = malloc(sizeof(int));
             *car_clientfd = clientfd;
+
+            sscanf(msg, "CAR %99s %3s %3s", new_car.name, new_car.lowest_floor, new_car.highest_floor);
+            new_car.car_fd = clientfd;
+
+            add_car_to_list(new_car);
 
             pthread_t car_thread;
             if (pthread_create(&car_thread, NULL, handle_car, car_clientfd) != 0)
@@ -133,11 +144,20 @@ int main()
         }
         else if (strncmp(msg, "CALL", 4) == 0)
         {
-            // Add the call request to the queue of struct_call request
-            // The CALL thread will handle this list.
+            char source_floor[4];
+            char destination_floor[4];
+
+            if (car_list_head == NULL)
+            {
+                send_message(clientfd, "UNAVAILABLE\n");
+            }
+
+            sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
+
+            // printf("Source floor: %s\n", source_floor);
+            // printf("Destination floor: %s\n", destination_floor);
         }
 
-        printf("Received this msg from client: %s\n", msg);
         free(msg);
 
         if (shutdown(clientfd, SHUT_RDWR) == -1)
@@ -155,7 +175,7 @@ int main()
 
 void *handle_car(void *arg)
 {
-    int car_clientfd = *((int *)arg); // Retrieve the unique car clientfd
+    int car_clientfd = *((int *)arg);
     free(arg);
 
     while (1)
@@ -169,8 +189,19 @@ void *handle_car(void *arg)
 
         if (strncmp(msg, "STATUS", 4))
         {
-            update_car_values(car_clientfd, "STATUS", "CURRENT_FLOOR", "DESTINATION_FLOOR");
+            char status[8];
+            char current_floor[4];
+            char destination_floor[4];
+
+            sscanf(msg, "STATUS %7s %3s %3s", status, current_floor, destination_floor);
+            update_car_values(car_clientfd, status, current_floor, destination_floor);
         }
+        else // If some other unexpected message was sent, terminate the car.
+        {
+            break;
+        }
+
+        free(msg);
     }
 
     if (shutdown(car_clientfd, SHUT_RDWR) == -1)
@@ -187,10 +218,11 @@ void *handle_car(void *arg)
     pthread_exit(NULL); // Terminate the thread
 }
 
-void handle_call()
+void *handle_call(void *arg)
 {
     // Receive call
     // Add destination, source, and direction to the linked list.
+    pthread_exit(NULL); // Terminate the thread
 }
 
 void recv_looped(int fd, void *buf, size_t sz)
@@ -302,13 +334,27 @@ void update_car_values(int car_clientfd, char *status, char *current_floor, char
     pthread_mutex_unlock(&list_mutex);
 }
 
-// Open a single thread for handling all calls.
+void send_looped(int fd, const void *buf, size_t sz)
+{
+    const char *ptr = buf;
+    size_t remain = sz;
 
-// If the message received is CAR
-// Create a new thread that communicates with the socketfd
-// Have thread running indefinitely receiving the status updates
-// Terminate thread once connection to that socketfd has been closed.
+    while (remain > 0)
+    {
+        ssize_t sent = write(fd, ptr, remain);
+        if (sent == -1)
+        {
+            perror("write()");
+            exit(EXIT_FAILURE);
+        }
+        ptr += sent;
+        remain -= sent;
+    }
+}
 
-// If the message received is CALL
-// Add the call request to the list of struct_call request
-// The CALL thread will handle this list.
+void send_message(int fd, const char *buf)
+{
+    uint32_t len = htonl(strlen(buf));
+    send_looped(fd, &len, sizeof(len));
+    send_looped(fd, buf, strlen(buf));
+}
