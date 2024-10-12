@@ -29,7 +29,7 @@
 
 typedef struct
 {
-    int carfd;
+    int car_fd;
     char name[100];
     char current_floor[4];
     char destination_floor[4];
@@ -61,8 +61,9 @@ CarNode *car_list_head = NULL;
 void recv_looped(int fd, void *buf, size_t sz);
 char *receive_msg(int fd);
 void *handle_car(void *arg);
-void remove_car_from_list(char *car_name);
+void remove_car_from_list(int car_fd);
 void add_car_to_list(car_information new_car);
+void update_car_values(int car_clientfd, char *status, char *current_floor, char *destination_floor);
 
 int main()
 {
@@ -152,87 +153,37 @@ int main()
     }
 }
 
-void add_car_to_list(car_information new_car)
-{
-    pthread_mutex_lock(&list_mutex);
-
-    CarNode *new_node = (CarNode *)malloc(sizeof(CarNode));
-    if (new_node == NULL)
-    {
-        perror("malloc()");
-        pthread_mutex_unlock(&list_mutex);
-        return;
-    }
-
-    new_node->car_info = new_car;
-    new_node->next = car_list_head;
-
-    car_list_head = new_node;
-
-    pthread_mutex_unlock(&list_mutex);
-}
-
-void remove_car_from_list(char *car_name)
-{
-    pthread_mutex_lock(&list_mutex);
-
-    CarNode *current = car_list_head;
-    CarNode *prev = NULL;
-
-    while (current != NULL)
-    {
-        if (strcmp(current->car_info.name, car_name) == 0)
-        {
-            // Remove the car node from the list
-            if (prev == NULL)
-            {
-                // Car is at the head of the list
-                car_list_head = current->next;
-            }
-            else
-            {
-                prev->next = current->next;
-            }
-            free(current);
-            break;
-        }
-        prev = current;
-        current = current->next;
-    }
-
-    pthread_mutex_unlock(&list_mutex);
-}
-
-void update_car_values(char *car_name, char *status, char *current_floor, char *destination_floor)
-{
-    pthread_mutex_lock(&list_mutex);
-
-    CarNode *current = car_list_head;
-
-    while (current != NULL)
-    {
-        if (strcmp(current->car_info.name, car_name) == 0)
-        {
-            strncpy(current->car_info.status, status, sizeof(current->car_info.status));
-            strncpy(current->car_info.current_floor, current_floor, sizeof(current->car_info.current_floor));
-            strncpy(current->car_info.destination_floor, destination_floor, sizeof(current->car_info.destination_floor));
-        }
-        current = current->next;
-    }
-
-    pthread_mutex_unlock(&list_mutex);
-}
-
 void *handle_car(void *arg)
 {
+    int car_clientfd = *((int *)arg); // Retrieve the unique car clientfd
+    free(arg);
+
     while (1)
     {
-        // Receive new status.
-        // Update the global linked list with this new status.
+        char *msg = receive_msg(car_clientfd);
+
+        if (msg == NULL)
+        {
+            break;
+        }
+
+        if (strncmp(msg, "STATUS", 4))
+        {
+            update_car_values(car_clientfd, "STATUS", "CURRENT_FLOOR", "DESTINATION_FLOOR");
+        }
     }
 
-    // Terminate thread once connection to that socketfd has been closed.
+    if (shutdown(car_clientfd, SHUT_RDWR) == -1)
+    {
+        perror("shutdown()");
+    }
 
+    if (close(car_clientfd) == -1)
+    {
+        perror("close()");
+    }
+
+    remove_car_from_list(car_clientfd);
     pthread_exit(NULL); // Terminate the thread
 }
 
@@ -270,6 +221,85 @@ char *receive_msg(int fd)
     buf[len] = '\0';
     recv_looped(fd, buf, len);
     return buf;
+}
+
+void add_car_to_list(car_information new_car)
+{
+    pthread_mutex_lock(&list_mutex);
+
+    CarNode *new_node = (CarNode *)malloc(sizeof(CarNode));
+    if (new_node == NULL)
+    {
+        perror("malloc()");
+        pthread_mutex_unlock(&list_mutex);
+        return;
+    }
+
+    new_node->car_info = new_car;
+    new_node->next = car_list_head;
+
+    car_list_head = new_node;
+
+    pthread_mutex_unlock(&list_mutex);
+}
+
+void remove_car_from_list(int car_fd)
+{
+    pthread_mutex_lock(&list_mutex);
+
+    CarNode *current = car_list_head;
+    CarNode *prev = NULL;
+
+    while (current != NULL)
+    {
+        if (current->car_info.car_fd == car_fd)
+        {
+            // Remove the car node from the list
+            if (prev == NULL)
+            {
+                // Car is at the head of the list
+                car_list_head = current->next;
+            }
+            else
+            {
+                prev->next = current->next;
+            }
+            free(current);
+            break;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&list_mutex);
+}
+
+void update_car_values(int car_clientfd, char *status, char *current_floor, char *destination_floor)
+{
+    pthread_mutex_lock(&list_mutex);
+
+    CarNode *current = car_list_head;
+
+    while (current != NULL)
+    {
+        // Compare the client file descriptor
+        if (current->car_info.car_fd == car_clientfd)
+        {
+            // Update the car's status and floors
+            strncpy(current->car_info.status, status, sizeof(current->car_info.status) - 1);
+            strncpy(current->car_info.current_floor, current_floor, sizeof(current->car_info.current_floor) - 1);
+            strncpy(current->car_info.destination_floor, destination_floor, sizeof(current->car_info.destination_floor) - 1);
+
+            // Ensure the strings are null-terminated
+            current->car_info.status[sizeof(current->car_info.status) - 1] = '\0';
+            current->car_info.current_floor[sizeof(current->car_info.current_floor) - 1] = '\0';
+            current->car_info.destination_floor[sizeof(current->car_info.destination_floor) - 1] = '\0';
+            break; // Exit loop once the car is found and updated
+        }
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&list_mutex);
 }
 
 // Open a single thread for handling all calls.
