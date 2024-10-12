@@ -45,9 +45,24 @@ typedef struct
     char destination_floor[4];
 } call_requests;
 
+// Linked list node structure
+typedef struct CarNode
+{
+    car_information car_info;
+    struct CarNode *next;
+} CarNode;
+
+// Mutex to protect access to the linked list
+pthread_mutex_t list_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Head of the linked list
+CarNode *car_list_head = NULL;
+
 void recv_looped(int fd, void *buf, size_t sz);
 char *receive_msg(int fd);
 void *handle_car(void *arg);
+void remove_car_from_list(char *car_name);
+void add_car_to_list(car_information new_car);
 
 int main()
 {
@@ -135,6 +150,77 @@ int main()
             exit(1);
         }
     }
+}
+
+void add_car_to_list(car_information new_car)
+{
+    pthread_mutex_lock(&list_mutex);
+
+    CarNode *new_node = (CarNode *)malloc(sizeof(CarNode));
+    if (new_node == NULL)
+    {
+        perror("malloc()");
+        pthread_mutex_unlock(&list_mutex);
+        return;
+    }
+
+    new_node->car_info = new_car;
+    new_node->next = car_list_head;
+
+    car_list_head = new_node;
+
+    pthread_mutex_unlock(&list_mutex);
+}
+
+void remove_car_from_list(char *car_name)
+{
+    pthread_mutex_lock(&list_mutex);
+
+    CarNode *current = car_list_head;
+    CarNode *prev = NULL;
+
+    while (current != NULL)
+    {
+        if (strcmp(current->car_info.name, car_name) == 0)
+        {
+            // Remove the car node from the list
+            if (prev == NULL)
+            {
+                // Car is at the head of the list
+                car_list_head = current->next;
+            }
+            else
+            {
+                prev->next = current->next;
+            }
+            free(current);
+            break;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&list_mutex);
+}
+
+void update_car_values(char *car_name, char *status, char *current_floor, char *destination_floor)
+{
+    pthread_mutex_lock(&list_mutex);
+
+    CarNode *current = car_list_head;
+
+    while (current != NULL)
+    {
+        if (strcmp(current->car_info.name, car_name) == 0)
+        {
+            strncpy(current->car_info.status, status, sizeof(current->car_info.status));
+            strncpy(current->car_info.current_floor, current_floor, sizeof(current->car_info.current_floor));
+            strncpy(current->car_info.destination_floor, destination_floor, sizeof(current->car_info.destination_floor));
+        }
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&list_mutex);
 }
 
 void *handle_car(void *arg)
