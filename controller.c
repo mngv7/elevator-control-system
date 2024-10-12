@@ -70,6 +70,7 @@ void send_message(int fd, const char *buf);
 
 int main()
 {
+    // Create a socket
     int listensockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (listensockfd == -1)
     {
@@ -77,6 +78,7 @@ int main()
         exit(1);
     }
 
+    // Set socket options
     int opt_enable = 1;
     if (setsockopt(listensockfd, SOL_SOCKET, SO_REUSEADDR, &opt_enable, sizeof(opt_enable)) == -1)
     {
@@ -84,6 +86,7 @@ int main()
         exit(1);
     }
 
+    // Bind the socket to the address
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -96,6 +99,7 @@ int main()
         exit(1);
     }
 
+    // Listen for incoming connections
     if (listen(listensockfd, 10) == -1)
     {
         perror("listen()");
@@ -180,6 +184,7 @@ void *handle_car(void *arg)
 
     while (1)
     {
+        // Error is occuring on the following line:
         char *msg = receive_msg(car_clientfd);
 
         if (msg == NULL)
@@ -230,11 +235,9 @@ void recv_looped(int fd, void *buf, size_t sz)
     char *ptr = buf;
     size_t remain = sz;
 
-    while (remain > 0)
-    {
+    while (remain > 0) {
         ssize_t received = read(fd, ptr, remain);
-        if (received == -1)
-        {
+        if (received == -1) {
             perror("read()");
             exit(1);
         }
@@ -248,7 +251,7 @@ char *receive_msg(int fd)
     uint32_t nlen;
     recv_looped(fd, &nlen, sizeof(nlen));
     uint32_t len = ntohl(nlen);
-
+    
     char *buf = malloc(len + 1);
     buf[len] = '\0';
     recv_looped(fd, buf, len);
