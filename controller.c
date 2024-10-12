@@ -185,7 +185,7 @@ void *handle_car(void *arg)
     while (1)
     {
         char *msg = receive_msg(car_clientfd);
-
+        
         if (msg == NULL)
         {
             break;
