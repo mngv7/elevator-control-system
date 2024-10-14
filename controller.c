@@ -13,6 +13,21 @@
 #include <errno.h>
 #include <pthread.h>
 
+// Receive a call in the form:
+// CALL 1 3
+// The from to destination is going up, therefore, store the stops as:
+// U1 U3 (see call_requests struct)
+// Example:
+// CALL 3 1
+// D3 D1
+
+// Create a linked-list storing the different stops, the linked list is:
+// broken into 3 blocks: Up, Down, Up
+
+// Stops with going up must be stored together in an ascending order.
+// Stops going down must be stored together in a descending order.
+// If an up stop is below the first entry in the first up block, then add
+// it to the second up block.
 typedef struct
 {
     int car_fd;
@@ -27,8 +42,7 @@ typedef struct
 typedef struct
 {
     char direction[2];
-    char source_floor[4];
-    char destination_floor[4];
+    char floor[4];
 } call_requests;
 
 // Linked list node structure
@@ -54,6 +68,7 @@ void update_car_values(int car_clientfd, char *status, char *current_floor, char
 void send_looped(int fd, const void *buf, size_t sz);
 void send_message(int fd, const char *buf);
 void print_car_list();
+char get_call_direction(char *source, char *destination);
 
 int main()
 {
@@ -137,9 +152,64 @@ int main()
             }
 
             sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
+            char **call_info = malloc(sizeof(char *) * 2);
+            call_info[0] = strdup(source_floor);      // Duplicate the string for source floor
+            call_info[1] = strdup(destination_floor); // Duplicate the string for destination floor
+
+            pthread_t call_thread;
+            if (pthread_create(&call_thread, NULL, handle_call, call_info) != 0)
+            {
+                perror("pthread_create() for handle_call");
+                free(call_info[0]); // Free allocated memory if thread creation fails
+                free(call_info[1]);
+                free(call_info);
+                exit(1);
+            }
         }
 
         free(msg);
+    }
+}
+
+void *handle_call(void *arg)
+{
+    char **call_info = (char **)arg;
+    char *source_floor = call_info[0];
+    char *destination_floor = call_info[1];
+
+    free(source_floor);
+    free(destination_floor);
+    free(call_info);
+
+    pthread_exit(NULL);
+}
+
+char get_call_direction(char *source, char *destination)
+{
+    int source_int = -1;
+    int destination_int = -1;
+
+    if (source[0] == 'B')
+    {
+        source_int = atoi(source + 1);
+    }
+
+    if (destination[0] == 'B')
+    {
+        destination_int = atoi(destination + 1);
+    }
+    else
+    {
+        destination_int = atoi(destination);
+    }
+
+    if (source_int < destination_int)
+    {
+        return 'U'; // Up
+    }
+    else
+    {
+        return 'D'; // Down
     }
 }
 
@@ -191,13 +261,6 @@ void *handle_car(void *arg)
     }
 
     remove_car_from_list(car_clientfd);
-    pthread_exit(NULL); // Terminate the thread
-}
-
-void *handle_call(void *arg)
-{
-    // Receive call
-    // Add destination, source, and direction to the linked list.
     pthread_exit(NULL); // Terminate the thread
 }
 
