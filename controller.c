@@ -30,9 +30,6 @@ typedef struct
 {
     int car_fd;
     char name[100];
-    char current_floor[4];
-    char destination_floor[4];
-    char status[8];
     char lowest_floor[4];
     char highest_floor[5];
 } car_information;
@@ -67,15 +64,15 @@ CallNode *call_list_head = NULL;
 void recv_looped(int fd, void *buf, size_t sz);
 char *receive_msg(int fd);
 void *handle_car(void *arg);
-void *handle_call(void *arg);
+void *update_call_queue(void *arg);
 void remove_car_from_list(int car_fd);
 void add_car_to_list(car_information new_car);
-void update_car_values(int car_clientfd, char *status, char *current_floor, char *destination_floor);
 void send_looped(int fd, const void *buf, size_t sz);
 void send_message(int fd, const char *buf);
 void print_car_list();
 char get_call_direction(char *source, char *destination);
 void add_call_request(call_requests new_call);
+char *get_and_pop_first_stop();
 
 int main()
 {
@@ -153,19 +150,19 @@ int main()
             char source_floor[4];
             char destination_floor[4];
 
-            if (car_list_head == NULL)
+            if (car_list_head == NULL) // If no car available.
             {
                 send_message(clientfd, "UNAVAILABLE\n");
             }
-            else
+            else // If cars are available.
             {
                 sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
                 char **call_info = malloc(sizeof(char *) * 2);
-                call_info[0] = strdup(source_floor);      // Duplicate the string for source floor
-                call_info[1] = strdup(destination_floor); // Duplicate the string for destination floor
+                call_info[0] = strdup(source_floor);
+                call_info[1] = strdup(destination_floor);
 
                 pthread_t call_thread;
-                if (pthread_create(&call_thread, NULL, handle_call, call_info) != 0)
+                if (pthread_create(&call_thread, NULL, update_call_queue, call_info) != 0)
                 {
                     perror("pthread_create() for handle_call");
                     free(call_info[0]); // Free allocated memory if thread creation fails
@@ -173,11 +170,77 @@ int main()
                     free(call_info);
                     exit(1);
                 }
+                char msg_to_client[110]; // Allocate a buffer large enough to hold the formatted message
+
+                // Format the message with the car name
+                snprintf(msg_to_client, sizeof(msg_to_client), "CAR %s\n", car_list_head->car_info.name);
+
+                // Send the formatted message
+                send_message(clientfd, msg_to_client);
             }
         }
 
         free(msg);
     }
+}
+
+void *handle_car(void *arg)
+{
+    int car_clientfd = *((int *)arg); // Dereference the pointer correctly
+    free(arg);                        // Free the dynamically allocated memory after dereferencing
+    char dispatched_floor[4];
+
+    if (pthread_detach(pthread_self()) != 0)
+    {
+        perror("pthread_detach()");
+        exit(1);
+    }
+    while (1)
+    {
+        // The following message is never received.
+        char *msg = receive_msg(car_clientfd);
+
+        if (msg == NULL)
+        {
+            break;
+        }
+
+        char status[8];
+        char current_floor[4];
+        char destination_floor[4];
+
+        sscanf(msg, "STATUS %7s %3s %3s", status, current_floor, destination_floor);
+
+        while (1)
+        {
+            if (call_list_head != NULL)
+            {
+                break;
+            }
+        }
+
+        strcpy(dispatched_floor, get_and_pop_first_stop());
+        char msg_to_car[10];
+
+        snprintf(msg_to_car, sizeof(msg_to_car), "FLOOR %s", dispatched_floor);
+
+        send_message(car_clientfd, msg_to_car);
+
+        free(msg);
+    }
+
+    if (shutdown(car_clientfd, SHUT_RDWR) == -1)
+    {
+        perror("shutdown()");
+    }
+
+    if (close(car_clientfd) == -1)
+    {
+        perror("close()");
+    }
+
+    remove_car_from_list(car_clientfd);
+    pthread_exit(NULL); // Terminate the thread
 }
 
 void print_call_list()
@@ -190,7 +253,34 @@ void print_call_list()
     pthread_mutex_unlock(&call_queue_list_mutex);
 }
 
-void *handle_call(void *arg)
+char *get_and_pop_first_stop()
+{
+    if (call_list_head == NULL)
+    {
+        return "E"; // Return "E" if the list is empty
+    }
+
+    // Store the floor value to return
+    char *first_floor = malloc(strlen(call_list_head->call.floor) + 1); // Allocate memory for the floor string
+    if (first_floor == NULL)
+    {
+        return "Memory allocation failed"; // Handle memory allocation failure
+    }
+    strcpy(first_floor, call_list_head->call.floor); // Copy the floor value to allocated memory
+
+    // Save the current head node
+    struct CallNode *temp = call_list_head;
+
+    // Update the head to the next node
+    call_list_head = call_list_head->next;
+
+    // Free the old head node
+    free(temp);
+
+    return first_floor; // Return the floor value of the deleted head
+}
+
+void *update_call_queue(void *arg)
 {
     char **call_info = (char **)arg;
     char *source_floor = call_info[0];
@@ -210,8 +300,6 @@ void *handle_call(void *arg)
     add_call_request(source_call);
     add_call_request(destination_call);
 
-    print_call_list();
-
     free(source_floor);
     free(destination_floor);
     free(call_info);
@@ -227,7 +315,7 @@ char get_call_direction(char *source, char *destination)
     // Convert source floor to integer
     if (source[0] == 'B')
     {
-        source_int = atoi(source + 1); 
+        source_int = atoi(source + 1);
     }
     else
     {
@@ -327,57 +415,6 @@ void add_call_request(call_requests new_call)
     pthread_mutex_unlock(&call_queue_list_mutex);
 }
 
-void *handle_car(void *arg)
-{
-    int car_clientfd = *((int *)arg); // Dereference the pointer correctly
-    free(arg);                        // Free the dynamically allocated memory after dereferencing
-
-    if (pthread_detach(pthread_self()) != 0)
-    {
-        perror("pthread_detach()");
-        exit(1);
-    }
-
-    while (1)
-    {
-        // The following message is never received.
-        char *msg = receive_msg(car_clientfd);
-        if (msg == NULL)
-        {
-            break;
-        }
-
-        if (strncmp(msg, "STATUS", 6) == 0)
-        {
-            char status[8];
-            char current_floor[4];
-            char destination_floor[4];
-
-            sscanf(msg, "STATUS %7s %3s %3s", status, current_floor, destination_floor);
-            update_car_values(car_clientfd, status, current_floor, destination_floor);
-        }
-        else // If some other unexpected message was sent, terminate the car.
-        {
-            break;
-        }
-
-        free(msg);
-    }
-
-    if (shutdown(car_clientfd, SHUT_RDWR) == -1)
-    {
-        perror("shutdown()");
-    }
-
-    if (close(car_clientfd) == -1)
-    {
-        perror("close()");
-    }
-
-    remove_car_from_list(car_clientfd);
-    pthread_exit(NULL); // Terminate the thread
-}
-
 void recv_looped(int fd, void *buf, size_t sz)
 {
     char *ptr = buf;
@@ -456,22 +493,6 @@ void remove_car_from_list(int car_fd)
         current = current->next;
     }
 
-    pthread_mutex_unlock(&car_list_mutex);
-}
-
-void update_car_values(int car_fd, char *status, char *current_floor, char *destination_floor)
-{
-    pthread_mutex_lock(&car_list_mutex);
-    for (CarNode *curr = car_list_head; curr; curr = curr->next)
-    {
-        if (curr->car_info.car_fd == car_fd)
-        {
-            strncpy(curr->car_info.status, status, sizeof(curr->car_info.status));
-            strncpy(curr->car_info.current_floor, current_floor, sizeof(curr->car_info.current_floor));
-            strncpy(curr->car_info.destination_floor, destination_floor, sizeof(curr->car_info.destination_floor));
-            break;
-        }
-    }
     pthread_mutex_unlock(&car_list_mutex);
 }
 
