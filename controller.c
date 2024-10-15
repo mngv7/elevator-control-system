@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -41,7 +39,7 @@ typedef struct
 
 typedef struct
 {
-    char direction[2];
+    char direction;
     char floor[4];
 } call_requests;
 
@@ -52,11 +50,19 @@ typedef struct CarNode
     struct CarNode *next;
 } CarNode;
 
+typedef struct CallNode
+{
+    call_requests call;
+    struct CallNode *next;
+} CallNode;
+
 // Mutex to protect access to the linked list
-pthread_mutex_t list_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t car_list_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t call_queue_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Head of the linked list
 CarNode *car_list_head = NULL;
+CallNode *call_list_head = NULL;
 
 void recv_looped(int fd, void *buf, size_t sz);
 char *receive_msg(int fd);
@@ -69,6 +75,7 @@ void send_looped(int fd, const void *buf, size_t sz);
 void send_message(int fd, const char *buf);
 void print_car_list();
 char get_call_direction(char *source, char *destination);
+void add_call_request(call_requests new_call);
 
 int main()
 {
@@ -150,20 +157,22 @@ int main()
             {
                 send_message(clientfd, "UNAVAILABLE\n");
             }
-
-            sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
-            char **call_info = malloc(sizeof(char *) * 2);
-            call_info[0] = strdup(source_floor);      // Duplicate the string for source floor
-            call_info[1] = strdup(destination_floor); // Duplicate the string for destination floor
-
-            pthread_t call_thread;
-            if (pthread_create(&call_thread, NULL, handle_call, call_info) != 0)
+            else
             {
-                perror("pthread_create() for handle_call");
-                free(call_info[0]); // Free allocated memory if thread creation fails
-                free(call_info[1]);
-                free(call_info);
-                exit(1);
+                sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
+                char **call_info = malloc(sizeof(char *) * 2);
+                call_info[0] = strdup(source_floor);      // Duplicate the string for source floor
+                call_info[1] = strdup(destination_floor); // Duplicate the string for destination floor
+
+                pthread_t call_thread;
+                if (pthread_create(&call_thread, NULL, handle_call, call_info) != 0)
+                {
+                    perror("pthread_create() for handle_call");
+                    free(call_info[0]); // Free allocated memory if thread creation fails
+                    free(call_info[1]);
+                    free(call_info);
+                    exit(1);
+                }
             }
         }
 
@@ -171,11 +180,37 @@ int main()
     }
 }
 
+void print_call_list()
+{
+    pthread_mutex_lock(&call_queue_list_mutex);
+    for (CallNode *curr = call_list_head; curr != NULL; curr = curr->next)
+    {
+        printf("Call Direction: %c, Floor: %s\n", curr->call.direction, curr->call.floor);
+    }
+    pthread_mutex_unlock(&call_queue_list_mutex);
+}
+
 void *handle_call(void *arg)
 {
     char **call_info = (char **)arg;
     char *source_floor = call_info[0];
     char *destination_floor = call_info[1];
+
+    char travel_direction = get_call_direction(source_floor, destination_floor);
+
+    call_requests source_call;
+    source_call.direction = travel_direction;
+    strcpy(source_call.floor, source_floor);
+
+    call_requests destination_call;
+    destination_call.direction = travel_direction;
+    strcpy(destination_call.floor, destination_floor);
+
+    // Add the above structs to the linked list.
+    add_call_request(source_call);
+    add_call_request(destination_call);
+
+    print_call_list();
 
     free(source_floor);
     free(destination_floor);
@@ -189,11 +224,17 @@ char get_call_direction(char *source, char *destination)
     int source_int = -1;
     int destination_int = -1;
 
+    // Convert source floor to integer
     if (source[0] == 'B')
     {
-        source_int = atoi(source + 1);
+        source_int = atoi(source + 1); 
+    }
+    else
+    {
+        source_int = atoi(source);
     }
 
+    // Convert destination floor to integer
     if (destination[0] == 'B')
     {
         destination_int = atoi(destination + 1);
@@ -203,14 +244,87 @@ char get_call_direction(char *source, char *destination)
         destination_int = atoi(destination);
     }
 
+    // Determine the direction of the call
     if (source_int < destination_int)
     {
         return 'U'; // Up
     }
-    else
+    else if (source_int > destination_int)
     {
         return 'D'; // Down
     }
+    else
+    {
+        return 'E'; // Equal (same floor)
+    }
+}
+
+void add_call_request(call_requests new_call)
+{
+    pthread_mutex_lock(&call_queue_list_mutex);
+
+    // Check for duplicates before adding
+    CallNode *current = call_list_head;
+    while (current != NULL)
+    {
+        if (strcmp(current->call.floor, new_call.floor) == 0 &&
+            current->call.direction == new_call.direction)
+        {
+            // Duplicate found, exit the function
+            pthread_mutex_unlock(&call_queue_list_mutex);
+            return;
+        }
+        current = current->next;
+    }
+
+    CallNode *new_node = (CallNode *)malloc(sizeof(CallNode));
+    if (new_node == NULL)
+    {
+        perror("malloc() for CallNode");
+        pthread_mutex_unlock(&call_queue_list_mutex);
+        return;
+    }
+
+    new_node->call = new_call;
+    new_node->next = NULL;
+
+    // Insert the new node into the correct position based on direction
+    if (call_list_head == NULL)
+    {
+        // List is empty
+        call_list_head = new_node;
+    }
+    else
+    {
+        // Existing list, insert in sorted order
+        CallNode *prev = NULL;
+        current = call_list_head;
+
+        while (current != NULL &&
+               ((current->call.direction == 'U' && new_call.direction == 'U' &&
+                 atoi(new_call.floor) > atoi(current->call.floor)) ||
+                (current->call.direction == 'D' && new_call.direction == 'D' &&
+                 atoi(new_call.floor) < atoi(current->call.floor))))
+        {
+            prev = current;
+            current = current->next;
+        }
+
+        if (prev == NULL)
+        {
+            // Insert at head
+            new_node->next = call_list_head;
+            call_list_head = new_node;
+        }
+        else
+        {
+            // Insert in the middle or at the end
+            new_node->next = current;
+            prev->next = new_node;
+        }
+    }
+
+    pthread_mutex_unlock(&call_queue_list_mutex);
 }
 
 void *handle_car(void *arg)
@@ -296,13 +410,13 @@ char *receive_msg(int fd)
 
 void add_car_to_list(car_information new_car)
 {
-    pthread_mutex_lock(&list_mutex);
+    pthread_mutex_lock(&car_list_mutex);
 
     CarNode *new_node = (CarNode *)malloc(sizeof(CarNode));
     if (new_node == NULL)
     {
         perror("malloc()");
-        pthread_mutex_unlock(&list_mutex);
+        pthread_mutex_unlock(&car_list_mutex);
         return;
     }
 
@@ -311,12 +425,12 @@ void add_car_to_list(car_information new_car)
 
     car_list_head = new_node;
 
-    pthread_mutex_unlock(&list_mutex);
+    pthread_mutex_unlock(&car_list_mutex);
 }
 
 void remove_car_from_list(int car_fd)
 {
-    pthread_mutex_lock(&list_mutex);
+    pthread_mutex_lock(&car_list_mutex);
 
     CarNode *current = car_list_head;
     CarNode *prev = NULL;
@@ -342,12 +456,12 @@ void remove_car_from_list(int car_fd)
         current = current->next;
     }
 
-    pthread_mutex_unlock(&list_mutex);
+    pthread_mutex_unlock(&car_list_mutex);
 }
 
 void update_car_values(int car_fd, char *status, char *current_floor, char *destination_floor)
 {
-    pthread_mutex_lock(&list_mutex);
+    pthread_mutex_lock(&car_list_mutex);
     for (CarNode *curr = car_list_head; curr; curr = curr->next)
     {
         if (curr->car_info.car_fd == car_fd)
@@ -358,7 +472,7 @@ void update_car_values(int car_fd, char *status, char *current_floor, char *dest
             break;
         }
     }
-    pthread_mutex_unlock(&list_mutex);
+    pthread_mutex_unlock(&car_list_mutex);
 }
 
 void send_looped(int fd, const void *buf, size_t sz)
@@ -388,7 +502,7 @@ void send_message(int fd, const char *buf)
 
 void print_car_list()
 {
-    pthread_mutex_lock(&list_mutex);
+    pthread_mutex_lock(&car_list_mutex);
     for (CarNode *curr = car_list_head; curr != NULL; curr = curr->next)
     {
         printf("Car Name: %s, Lowest Floor: %s, Highest Floor: %s\n",
@@ -396,5 +510,5 @@ void print_car_list()
                curr->car_info.lowest_floor,
                curr->car_info.highest_floor);
     }
-    pthread_mutex_unlock(&list_mutex);
+    pthread_mutex_unlock(&car_list_mutex);
 }
