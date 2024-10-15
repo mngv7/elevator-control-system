@@ -195,12 +195,6 @@ int is_car_available(char *source_floor, char *destination_floor) // B2 3
     char *highest_floor = car_list_head->car_info.highest_floor; // 4
     char *lowest_floor = car_list_head->car_info.lowest_floor;   // B1
 
-    printf("Highest floor: %s\n", highest_floor);
-    printf("Lowest floor: %s\n", lowest_floor);
-
-    printf("Source floor: %s\n", source_floor);
-    printf("Destination floor: %s\n", destination_floor);
-
     // If source or destination floor is above highest floor
     if ((get_call_direction(highest_floor, source_floor) == 'U') ||
         (get_call_direction(highest_floor, destination_floor) == 'U'))
@@ -349,7 +343,7 @@ char get_call_direction(char *source, char *destination)
     // Convert source floor to integer
     if (source[0] == 'B')
     {
-        source_int = atoi(source + 1);
+        source_int = -atoi(source + 1); // Negative value for basement floors
     }
     else
     {
@@ -359,7 +353,7 @@ char get_call_direction(char *source, char *destination)
     // Convert destination floor to integer
     if (destination[0] == 'B')
     {
-        destination_int = atoi(destination + 1);
+        destination_int = -atoi(destination + 1); // Negative value for basement floors
     }
     else
     {
@@ -380,6 +374,7 @@ char get_call_direction(char *source, char *destination)
         return 'E'; // Equal (same floor)
     }
 }
+
 
 void add_call_request(call_requests new_call)
 {
