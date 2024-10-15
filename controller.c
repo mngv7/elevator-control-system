@@ -73,6 +73,7 @@ void print_car_list();
 char get_call_direction(char *source, char *destination);
 void add_call_request(call_requests new_call);
 char *get_and_pop_first_stop();
+int is_car_available(char *source_floor, char *destination_floor);
 
 int main()
 {
@@ -149,14 +150,14 @@ int main()
         {
             char source_floor[4];
             char destination_floor[4];
+            sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
 
-            if (car_list_head == NULL) // If no car available.
+            if (is_car_available(source_floor, destination_floor) == 0) // If no car available.
             {
                 send_message(clientfd, "UNAVAILABLE\n");
             }
             else // If cars are available.
             {
-                sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
                 char **call_info = malloc(sizeof(char *) * 2);
                 call_info[0] = strdup(source_floor);
                 call_info[1] = strdup(destination_floor);
@@ -182,6 +183,39 @@ int main()
 
         free(msg);
     }
+}
+
+int is_car_available(char *source_floor, char *destination_floor) // B2 3
+{
+    if (car_list_head == NULL)
+    {
+        return 0;
+    }
+
+    char *highest_floor = car_list_head->car_info.highest_floor; // 4
+    char *lowest_floor = car_list_head->car_info.lowest_floor;   // B1
+
+    printf("Highest floor: %s\n", highest_floor);
+    printf("Lowest floor: %s\n", lowest_floor);
+
+    printf("Source floor: %s\n", source_floor);
+    printf("Destination floor: %s\n", destination_floor);
+
+    // If source or destination floor is above highest floor
+    if ((get_call_direction(highest_floor, source_floor) == 'U') ||
+        (get_call_direction(highest_floor, destination_floor) == 'U'))
+    {
+        return 0;
+    }
+
+    // If source or destination floor is below lowest floor
+    if ((get_call_direction(lowest_floor, source_floor) == 'D') ||
+        (get_call_direction(lowest_floor, destination_floor) == 'D'))
+    {
+        return 0;
+    }
+
+    return 1;
 }
 
 void *handle_car(void *arg)
