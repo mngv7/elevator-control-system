@@ -52,10 +52,11 @@ void *update_call_queue(void *arg);
 void remove_car_from_list(int car_fd);
 void add_car_to_list(car_information new_car);
 void print_car_list();
-char get_call_direction(char *source, char *destination);
+char get_call_direction(const char *source, const char *destination);
 void add_call_request(call_requests new_call);
 char *get_and_pop_first_stop();
-int is_car_available(char *source_floor, char *destination_floor);
+int is_car_available(char *source_floor, char *destination_floor, CarNode *car);
+CarNode *choose_car(char *source_floor, char *destination_floor);
 
 int main()
 {
@@ -128,13 +129,13 @@ int main()
         }
         else if (strncmp(msg, "CALL", 4) == 0)
         {
-            print_car_list();
-
             char source_floor[4];
             char destination_floor[4];
             sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
 
-            if (is_car_available(source_floor, destination_floor) == 0) // If no car available.
+            CarNode *chosen_car = choose_car(source_floor, destination_floor);
+
+            if (chosen_car == NULL)
             {
                 send_message(clientfd, "UNAVAILABLE\n");
             }
@@ -156,7 +157,7 @@ int main()
                 char msg_to_client[110]; // Allocate a buffer large enough to hold the formatted message
 
                 // Format the message with the car name
-                snprintf(msg_to_client, sizeof(msg_to_client), "CAR %s\n", car_list_head->car_info.name);
+                snprintf(msg_to_client, sizeof(msg_to_client), "CAR %s\n", chosen_car->car_info.name);
 
                 // Send the formatted message
                 send_message(clientfd, msg_to_client);
@@ -167,15 +168,32 @@ int main()
     }
 }
 
-int is_car_available(char *source_floor, char *destination_floor) // B2 3
+CarNode *choose_car(char *source_floor, char *destination_floor)
+{
+    CarNode *current = car_list_head;
+
+    while (current != NULL)
+    {
+        if (is_car_available(source_floor, destination_floor, current) == 1)
+        {
+            return current; // Return the current node directly
+        }
+
+        current = current->next;
+    }
+
+    return NULL; // No available car found
+}
+
+int is_car_available(char *source_floor, char *destination_floor, CarNode *car)
 {
     if (car_list_head == NULL)
     {
         return 0;
     }
 
-    char *highest_floor = car_list_head->car_info.highest_floor; // 4
-    char *lowest_floor = car_list_head->car_info.lowest_floor;   // B1
+    char *highest_floor = car->car_info.highest_floor;
+    char *lowest_floor = car->car_info.lowest_floor;
 
     // If source or destination floor is above highest floor
     if ((get_call_direction(highest_floor, source_floor) == 'U') ||
@@ -253,16 +271,6 @@ void *handle_car(void *arg)
     pthread_exit(NULL); // Terminate the thread
 }
 
-void print_call_list()
-{
-    pthread_mutex_lock(&call_queue_list_mutex);
-    for (CallNode *curr = call_list_head; curr != NULL; curr = curr->next)
-    {
-        printf("Call Direction: %c, Floor: %s\n", curr->call.direction, curr->call.floor);
-    }
-    pthread_mutex_unlock(&call_queue_list_mutex);
-}
-
 char *get_and_pop_first_stop()
 {
     if (call_list_head == NULL)
@@ -317,10 +325,16 @@ void *update_call_queue(void *arg)
     pthread_exit(NULL);
 }
 
-char get_call_direction(char *source, char *destination)
+char get_call_direction(const char *source, const char *destination)
 {
     int source_int = -1;
     int destination_int = -1;
+
+    // Validate input strings
+    if (source == NULL || destination == NULL)
+    {
+        return 'E'; // Return 'E' for invalid input
+    }
 
     // Convert source floor to integer
     if (source[0] == 'B')
@@ -476,8 +490,6 @@ void remove_car_from_list(int car_fd)
     pthread_mutex_unlock(&car_list_mutex);
 }
 
-
-
 void print_car_list()
 {
     pthread_mutex_lock(&car_list_mutex);
@@ -489,4 +501,14 @@ void print_car_list()
                curr->car_info.highest_floor);
     }
     pthread_mutex_unlock(&car_list_mutex);
+}
+
+void print_call_list()
+{
+    pthread_mutex_lock(&call_queue_list_mutex);
+    for (CallNode *curr = call_list_head; curr != NULL; curr = curr->next)
+    {
+        printf("Call Direction: %c, Floor: %s\n", curr->call.direction, curr->call.floor);
+    }
+    pthread_mutex_unlock(&call_queue_list_mutex);
 }
