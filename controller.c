@@ -10,22 +10,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <pthread.h>
+#include "network_utils.h"
 
-// Receive a call in the form:
-// CALL 1 3
-// The from to destination is going up, therefore, store the stops as:
-// U1 U3 (see call_requests struct)
-// Example:
-// CALL 3 1
-// D3 D1
-
-// Create a linked-list storing the different stops, the linked list is:
-// broken into 3 blocks: Up, Down, Up
-
-// Stops with going up must be stored together in an ascending order.
-// Stops going down must be stored together in a descending order.
-// If an up stop is below the first entry in the first up block, then add
-// it to the second up block.
 typedef struct
 {
     int car_fd;
@@ -61,14 +47,10 @@ pthread_mutex_t call_queue_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 CarNode *car_list_head = NULL;
 CallNode *call_list_head = NULL;
 
-void recv_looped(int fd, void *buf, size_t sz);
-char *receive_msg(int fd);
 void *handle_car(void *arg);
 void *update_call_queue(void *arg);
 void remove_car_from_list(int car_fd);
 void add_car_to_list(car_information new_car);
-void send_looped(int fd, const void *buf, size_t sz);
-void send_message(int fd, const char *buf);
 void print_car_list();
 char get_call_direction(char *source, char *destination);
 void add_call_request(call_requests new_call);
@@ -143,11 +125,11 @@ int main()
                 perror("pthread_create()");
                 exit(1);
             }
-
-            // Detach the thread so that its resources are automatically freed when it terminates
         }
         else if (strncmp(msg, "CALL", 4) == 0)
         {
+            print_car_list();
+
             char source_floor[4];
             char destination_floor[4];
             sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
@@ -375,7 +357,6 @@ char get_call_direction(char *source, char *destination)
     }
 }
 
-
 void add_call_request(call_requests new_call)
 {
     pthread_mutex_lock(&call_queue_list_mutex);
@@ -444,36 +425,6 @@ void add_call_request(call_requests new_call)
     pthread_mutex_unlock(&call_queue_list_mutex);
 }
 
-void recv_looped(int fd, void *buf, size_t sz)
-{
-    char *ptr = buf;
-    size_t remain = sz;
-
-    while (remain > 0)
-    {
-        ssize_t received = read(fd, ptr, remain);
-        if (received == -1)
-        {
-            perror("read()");
-            exit(1);
-        }
-        ptr += received;
-        remain -= received;
-    }
-}
-
-char *receive_msg(int fd)
-{
-    uint32_t nlen;
-    recv_looped(fd, &nlen, sizeof(nlen));
-    uint32_t len = ntohl(nlen);
-
-    char *buf = malloc(len + 1);
-    buf[len] = '\0';
-    recv_looped(fd, buf, len);
-    return buf;
-}
-
 void add_car_to_list(car_information new_car)
 {
     pthread_mutex_lock(&car_list_mutex);
@@ -525,30 +476,7 @@ void remove_car_from_list(int car_fd)
     pthread_mutex_unlock(&car_list_mutex);
 }
 
-void send_looped(int fd, const void *buf, size_t sz)
-{
-    const char *ptr = buf;
-    size_t remain = sz;
 
-    while (remain > 0)
-    {
-        ssize_t sent = write(fd, ptr, remain);
-        if (sent == -1)
-        {
-            perror("write()");
-            exit(EXIT_FAILURE);
-        }
-        ptr += sent;
-        remain -= sent;
-    }
-}
-
-void send_message(int fd, const char *buf)
-{
-    uint32_t len = htonl(strlen(buf));
-    send_looped(fd, &len, sizeof(len));
-    send_looped(fd, buf, strlen(buf));
-}
 
 void print_car_list()
 {
