@@ -17,6 +17,8 @@ typedef struct
     char name[100];
     char lowest_floor[4];
     char highest_floor[5];
+    char current_floor[4];     // New field for current floor
+    char destination_floor[4]; // New field for destination floor
 } car_information;
 
 typedef struct
@@ -225,6 +227,49 @@ int has_call_for_car(int car_clientfd)
     return 0; // No call for this car
 }
 
+void *status_checking_thread(void *arg)
+{
+    int car_clientfd = *((int *)arg);
+    free(arg);
+
+    while (1)
+    {
+        char *msg = receive_msg(car_clientfd);
+        char status[8];
+        char current_floor[4];
+        char destination_floor[4];
+        sscanf(msg, "STATUS %s %s %s", status, current_floor, destination_floor);
+
+        // Update car's current floor and destination floor
+        CarNode *car_node = car_list_head;
+        while (car_node != NULL)
+        {
+            if (car_node->car_info.car_fd == car_clientfd)
+            {
+                pthread_mutex_lock(&car_list_mutex);
+                strcpy(car_node->car_info.current_floor, current_floor);
+                strcpy(car_node->car_info.destination_floor, destination_floor);
+                pthread_mutex_unlock(&car_list_mutex);
+                break;
+            }
+            car_node = car_node->next;
+        }
+
+        // Check for emergency or individual service messages
+        if (strcmp(msg, "EMERGENCY") == 0 || strcmp(msg, "INDIVIDUAL SERVICE") == 0)
+        {
+            break;
+        }
+
+        free(msg);
+    }
+
+    shutdown(car_clientfd, SHUT_RDWR);
+    close(car_clientfd);
+    remove_car_from_list(car_clientfd);
+    pthread_exit(NULL);
+}
+
 void *handle_car(void *arg)
 {
     int car_clientfd = *((int *)arg);
@@ -236,59 +281,50 @@ void *handle_car(void *arg)
         exit(EXIT_FAILURE);
     }
 
+    // Access the car's information
+    CarNode *car_node = car_list_head;
+    while (car_node != NULL)
+    {
+        if (car_node->car_info.car_fd == car_clientfd)
+        {
+            break; // Found the correct car
+        }
+        car_node = car_node->next;
+    }
+
     char dispatched_floor[4];
+
+    int *status_fd = malloc(sizeof(int));
+    *status_fd = car_clientfd;
+    pthread_t status_thread;
+    if (pthread_create(&status_thread, NULL, status_checking_thread, status_fd) != 0)
+    {
+        perror("pthread_create() for status_checking_thread");
+        exit(EXIT_FAILURE);
+    }
 
     while (1)
     {
-        char *msg = receive_msg(car_clientfd);
+        pthread_mutex_lock(&call_list_mutex);
 
-        // Check for emergency, service, or individual service messages
-        if (strcmp(msg, "EMERGENCY") == 0 || strcmp(msg, "INDIVIDUAL SERVICE") == 0)
+        char *next_stop = get_and_pop_first_stop(car_clientfd);
+
+        if (strcmp(car_node->car_info.current_floor, car_node->car_info.destination_floor) == 0)
         {
-            remove_car_from_list(car_clientfd);
-            break; // Exit the loop and terminate the thread
-        }
-
-        char status[8];
-        char current_floor[4];
-        char destination_floor[4];
-        sscanf(msg, "STATUS %s %s %s", status, current_floor, destination_floor);
-
-        if (strcmp(current_floor, destination_floor) == 0) // The car has arrived at its destination
-        {
-            while (1)
+            if (strcmp(next_stop, "E") != 0) // If there's a valid next stop
             {
-                pthread_mutex_lock(&call_list_mutex);
+                snprintf(dispatched_floor, sizeof(dispatched_floor), "%s", next_stop);
+                char msg_to_car[10];
+                snprintf(msg_to_car, sizeof(msg_to_car), "FLOOR %s", dispatched_floor);
+                send_message(car_clientfd, msg_to_car); // Dispatch the floor
 
-                // Get the next stop for this car
-                char *next_stop = get_and_pop_first_stop(car_clientfd);
-
-                if (strcmp(next_stop, "E") != 0) // If there's a valid next stop
-                {
-                    //printf("Valid next stop found!\n");
-                    snprintf(dispatched_floor, sizeof(dispatched_floor), "%s", next_stop);
-                    char msg_to_car[10];
-                    snprintf(msg_to_car, sizeof(msg_to_car), "FLOOR %s", dispatched_floor);
-                    send_message(car_clientfd, msg_to_car); // Dispatch the floor
-                    free(next_stop); // Free the allocated memory for next_stop
-                    pthread_mutex_unlock(&call_list_mutex);
-
-                    break;
-                }
-                else
-                {
-                    //printf("No valid next stops.\n");
-                }
-
-                pthread_mutex_unlock(&call_list_mutex);
-                usleep(1000); // Sleep to avoid busy waiting
+                free(next_stop); // Free the allocated memory for next_stop
             }
         }
-    }
 
-    shutdown(car_clientfd, SHUT_RDWR);
-    close(car_clientfd);
-    remove_car_from_list(car_clientfd); // Ensure car is removed from the list when thread terminates
+        pthread_mutex_unlock(&call_list_mutex);
+        usleep(1000); // Sleep to avoid busy waiting
+    }
     pthread_exit(NULL);
 }
 
