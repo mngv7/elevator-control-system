@@ -242,7 +242,13 @@ void *handle_car(void *arg)
     {
         char *msg = receive_msg(car_clientfd);
 
-        printf("Message received: %s\n", msg);
+        // Check for emergency, service, or individual service messages
+        if (strcmp(msg, "EMERGENCY") == 0 || strcmp(msg, "INDIVIDUAL SERVICE") == 0)
+        {
+            remove_car_from_list(car_clientfd);
+            break; // Exit the loop and terminate the thread
+        }
+
         char status[8];
         char current_floor[4];
         char destination_floor[4];
@@ -250,46 +256,39 @@ void *handle_car(void *arg)
 
         if (strcmp(current_floor, destination_floor) == 0) // The car has arrived at its destination
         {
-            printf("Entering the inner infinite loop here\n");
-
             while (1)
             {
-
                 pthread_mutex_lock(&call_list_mutex);
 
-                // Check if there is a call for this car
-                if (has_call_for_car(car_clientfd))
-                {
-                    printf("There is a call for this car!\n");
-                    CallNode *current = call_list_head;
-                    while (current != NULL) // Loop through the queue
-                    {
-                        if (current->call.assigned_car_fd == car_clientfd) // If a call in the queue is meant for this car
-                        {
-                            strcpy(dispatched_floor, get_and_pop_first_stop(car_clientfd)); // Get that call
-                            char msg_to_car[10];
-                            snprintf(msg_to_car, sizeof(msg_to_car), "FLOOR %s", dispatched_floor);
-                            send_message(car_clientfd, msg_to_car); // Dispatch the floor
-                            printf("Sent to car: %s\n", msg_to_car);
-                            break;
-                        }
-                        current = current->next;
-                    }
+                // Get the next stop for this car
+                char *next_stop = get_and_pop_first_stop(car_clientfd);
 
+                if (strcmp(next_stop, "E") != 0) // If there's a valid next stop
+                {
+                    //printf("Valid next stop found!\n");
+                    snprintf(dispatched_floor, sizeof(dispatched_floor), "%s", next_stop);
+                    char msg_to_car[10];
+                    snprintf(msg_to_car, sizeof(msg_to_car), "FLOOR %s", dispatched_floor);
+                    send_message(car_clientfd, msg_to_car); // Dispatch the floor
+                    free(next_stop); // Free the allocated memory for next_stop
                     pthread_mutex_unlock(&call_list_mutex);
-                    printf("Breaking the inner infinite loop here\n");
+
                     break;
                 }
-                
+                else
+                {
+                    //printf("No valid next stops.\n");
+                }
+
                 pthread_mutex_unlock(&call_list_mutex);
-                usleep(1000);
+                usleep(1000); // Sleep to avoid busy waiting
             }
         }
     }
 
     shutdown(car_clientfd, SHUT_RDWR);
     close(car_clientfd);
-    remove_car_from_list(car_clientfd);
+    remove_car_from_list(car_clientfd); // Ensure car is removed from the list when thread terminates
     pthread_exit(NULL);
 }
 
