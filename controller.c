@@ -136,6 +136,7 @@ int main()
         }
         else if (strncmp(msg, "CALL", 4) == 0)
         {
+            // printf("Call received: %s\n", msg);
             char source_floor[4], destination_floor[4];
             sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
 
@@ -210,11 +211,24 @@ int is_car_available(char *source_floor, char *destination_floor, CarNode *car)
     return 1;
 }
 
+int has_call_for_car(int car_clientfd)
+{
+    CallNode *current = call_list_head;
+    while (current != NULL)
+    {
+        if (current->call.assigned_car_fd == car_clientfd)
+        {
+            return 1; // Found a call for this car
+        }
+        current = current->next;
+    }
+    return 0; // No call for this car
+}
+
 void *handle_car(void *arg)
 {
     int car_clientfd = *((int *)arg);
     free(arg);
-    char dispatched_floor[4];
 
     if (pthread_detach(pthread_self()) != 0)
     {
@@ -222,29 +236,55 @@ void *handle_car(void *arg)
         exit(EXIT_FAILURE);
     }
 
+    char dispatched_floor[4];
+
     while (1)
     {
-        while (1)
-        {
-            pthread_mutex_lock(&call_list_mutex);
-            CallNode *current = call_list_head;
-            while (current != NULL)
-            {
-                if (current->call.assigned_car_fd == car_clientfd)
-                {
-                    strcpy(dispatched_floor, get_and_pop_first_stop(car_clientfd));
-                    pthread_mutex_unlock(&call_list_mutex);
-                    goto send_floor; // Use goto to exit nested loop
-                }
-                current = current->next;
-            }
-            pthread_mutex_unlock(&call_list_mutex);
-        }
+        char *msg = receive_msg(car_clientfd);
 
-    send_floor:
-        char msg_to_car[10];
-        snprintf(msg_to_car, sizeof(msg_to_car), "FLOOR %s", dispatched_floor);
-        send_message(car_clientfd, msg_to_car);
+        printf("Message received: %s\n", msg);
+        char status[8];
+        char current_floor[4];
+        char destination_floor[4];
+        sscanf(msg, "STATUS %s %s %s", status, current_floor, destination_floor);
+
+        if (strcmp(current_floor, destination_floor) == 0) // The car has arrived at its destination
+        {
+            printf("Entering the inner infinite loop here\n");
+
+            while (1)
+            {
+
+                pthread_mutex_lock(&call_list_mutex);
+
+                // Check if there is a call for this car
+                if (has_call_for_car(car_clientfd))
+                {
+                    printf("There is a call for this car!\n");
+                    CallNode *current = call_list_head;
+                    while (current != NULL) // Loop through the queue
+                    {
+                        if (current->call.assigned_car_fd == car_clientfd) // If a call in the queue is meant for this car
+                        {
+                            strcpy(dispatched_floor, get_and_pop_first_stop(car_clientfd)); // Get that call
+                            char msg_to_car[10];
+                            snprintf(msg_to_car, sizeof(msg_to_car), "FLOOR %s", dispatched_floor);
+                            send_message(car_clientfd, msg_to_car); // Dispatch the floor
+                            printf("Sent to car: %s\n", msg_to_car);
+                            break;
+                        }
+                        current = current->next;
+                    }
+
+                    pthread_mutex_unlock(&call_list_mutex);
+                    printf("Breaking the inner infinite loop here\n");
+                    break;
+                }
+                
+                pthread_mutex_unlock(&call_list_mutex);
+                usleep(1000);
+            }
+        }
     }
 
     shutdown(car_clientfd, SHUT_RDWR);
