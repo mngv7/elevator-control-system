@@ -33,56 +33,56 @@ typedef struct
     uint8_t emergency_mode;
 } car_shared_mem;
 
-car_shared_mem *ptr;
+car_shared_mem *car_shared_memory;
 
 void check_up_down_allowed()
 {
-    pthread_mutex_lock(&ptr->mutex);
+    pthread_mutex_lock(&car_shared_memory->mutex);
 
-    if (!ptr->individual_service_mode)
+    if (!car_shared_memory->individual_service_mode)
     {
         printf("Operation only allowed in service mode.\n");
     }
-    else if (strcmp(ptr->status, status_names[4]) == 0)
+    else if (strcmp(car_shared_memory->status, status_names[4]) == 0)
     {
         printf("Operation not allowed while elevator is moving.\n");
     }
-    else if (strcmp(ptr->status, status_names[3]) != 0)
+    else if (strcmp(car_shared_memory->status, status_names[3]) != 0)
     {
         printf("Operation not allowed while doors are open.\n");
     }
     else
     {
-        pthread_mutex_unlock(&ptr->mutex);
+        pthread_mutex_unlock(&car_shared_memory->mutex);
         return; // Operation allowed, exit function early
     }
 
-    pthread_mutex_unlock(&ptr->mutex);
+    pthread_mutex_unlock(&car_shared_memory->mutex);
     exit(1); // Exit if any condition fails
 }
 
 void update_shared_mem(uint8_t *ptr_to_update, int new_val)
 {
-    pthread_mutex_lock(&ptr->mutex);
+    pthread_mutex_lock(&car_shared_memory->mutex);
     *ptr_to_update = new_val;
-    pthread_cond_signal(&ptr->cond);
-    pthread_mutex_unlock(&ptr->mutex);
+    pthread_cond_signal(&car_shared_memory->cond);
+    pthread_mutex_unlock(&car_shared_memory->mutex);
 }
 
 void handle_floor_change(int direction)
 {
-    pthread_mutex_lock(&ptr->mutex);
+    pthread_mutex_lock(&car_shared_memory->mutex);
 
-    int current_floor = atoi(ptr->current_floor);
+    int current_floor = atoi(car_shared_memory->current_floor);
 
-    if (ptr->current_floor[0] == 'B') // Handling basement floors
+    if (car_shared_memory->current_floor[0] == 'B') // Handling basement floors
     {
-        current_floor = atoi(ptr->current_floor + 1); // Skip the first character
+        current_floor = atoi(car_shared_memory->current_floor + 1); // Skip the first character
         if (direction == 1)
         {
-            if (strcmp(ptr->current_floor, "B1") == 0)
+            if (strcmp(car_shared_memory->current_floor, "B1") == 0)
             {
-                strcpy(ptr->destination_floor, "1");
+                strcpy(car_shared_memory->destination_floor, "1");
             }
             else
             {
@@ -93,7 +93,7 @@ void handle_floor_change(int direction)
         {
             current_floor++;
         }
-        snprintf(ptr->destination_floor, 4, "B%02d", current_floor);
+        snprintf(car_shared_memory->destination_floor, 4, "B%02d", current_floor);
     }
     else
     {
@@ -108,7 +108,7 @@ void handle_floor_change(int direction)
 
         if (current_floor <= 0)
         {
-            snprintf(ptr->destination_floor, 4, "B1");
+            snprintf(car_shared_memory->destination_floor, 4, "B1");
         }
         else
         {
@@ -116,12 +116,12 @@ void handle_floor_change(int direction)
             {
                 current_floor = 999;
             }
-            snprintf(ptr->destination_floor, 4, "%d", current_floor);
+            snprintf(car_shared_memory->destination_floor, 4, "%d", current_floor);
         }
     }
 
-    pthread_cond_signal(&ptr->cond);
-    pthread_mutex_unlock(&ptr->mutex);
+    pthread_cond_signal(&car_shared_memory->cond);
+    pthread_mutex_unlock(&car_shared_memory->mutex);
     exit(0);
 }
 
@@ -145,9 +145,9 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    ptr = mmap(0, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    car_shared_memory = mmap(0, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
 
-    if (ptr == MAP_FAILED)
+    if (car_shared_memory == MAP_FAILED)
     {
         perror("mmap");
         exit(1);
@@ -155,24 +155,24 @@ int main(int argc, char **argv)
 
     if (!strcmp(argv[2], "open"))
     {
-        update_shared_mem(&ptr->open_button, 1);
+        update_shared_mem(&car_shared_memory->open_button, 1);
     }
     else if (!strcmp(argv[2], "close"))
     {
-        update_shared_mem(&ptr->close_button, 1);
+        update_shared_mem(&car_shared_memory->close_button, 1);
     }
     else if (!strcmp(argv[2], "stop"))
     {
-        update_shared_mem(&ptr->emergency_stop, 1);
+        update_shared_mem(&car_shared_memory->emergency_stop, 1);
     }
     else if (!strcmp(argv[2], "service_on"))
     {
-        update_shared_mem(&ptr->individual_service_mode, 1);
-        ptr->emergency_mode = 0;
+        update_shared_mem(&car_shared_memory->individual_service_mode, 1);
+        car_shared_memory->emergency_mode = 0;
     }
     else if (!strcmp(argv[2], "service_off"))
     {
-        update_shared_mem(&ptr->individual_service_mode, 0);
+        update_shared_mem(&car_shared_memory->individual_service_mode, 0);
     }
     else if (!strcmp(argv[2], "up"))
     {

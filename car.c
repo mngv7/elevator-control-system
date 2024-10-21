@@ -40,13 +40,16 @@ typedef struct
     char lowest_floor[4];
     char highest_floor[4];
     int delay;
+    car_shared_mem *ptr_to_shared_mem;
 } car_information;
 
 int shm_fd = -1;
-car_shared_mem *ptr; // Pointer to shared memory
+car_shared_mem *car_shared_memory; // Pointer to shared memory
 
 void terminate_shared_memory(int sig_num);
 void *connnect_to_controller(void *arg);
+void reached_destination_floor(car_shared_mem *shared_mem);
+void traverse_car(car_shared_mem *shared_mem);
 
 int main(int argc, char **argv)
 {
@@ -61,6 +64,10 @@ int main(int argc, char **argv)
     // Esnure the car doesn't crash when write fails.
     signal(SIGPIPE, SIG_IGN);
 
+    char car_name[100] = "/car";
+
+    strcat(car_name, argv[1]);
+
     car_information car_info;
 
     strcpy(car_info.name, argv[1]);
@@ -69,9 +76,9 @@ int main(int argc, char **argv)
     car_info.delay = atoi(argv[4]);
 
     // Unlink the shared memory incase it exists.
-    shm_unlink("/carA");
+    shm_unlink(car_name);
 
-    shm_fd = shm_open(argv[1], O_CREAT | O_RDWR, 0666);
+    shm_fd = shm_open(car_name, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1)
     {
         perror("shm_open");
@@ -84,37 +91,40 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    ptr = mmap(0, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (ptr == MAP_FAILED)
+    car_shared_memory = mmap(0, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (car_shared_memory == MAP_FAILED)
     {
         perror("mmap");
         exit(1);
     }
 
+    car_info.ptr_to_shared_mem = car_shared_memory;
+
     // Initialised the mutex.
     pthread_mutexattr_t mutex_attr;
     pthread_mutexattr_init(&mutex_attr);
     pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(&ptr->mutex, &mutex_attr);
+    pthread_mutex_init(&car_shared_memory->mutex, &mutex_attr);
     pthread_mutexattr_destroy(&mutex_attr);
 
     // Initialise the condition variable.
     pthread_condattr_t cond_attr;
     pthread_condattr_init(&cond_attr);
     pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
-    pthread_cond_init(&ptr->cond, &cond_attr);
+    pthread_cond_init(&car_shared_memory->cond, &cond_attr);
     pthread_condattr_destroy(&cond_attr);
 
-    strcpy(ptr->current_floor, argv[2]);
-    strcpy(ptr->destination_floor, argv[2]);
-    strcpy(ptr->status, status_names[3]);
-    ptr->open_button = 0;
-    ptr->close_button = 0;
-    ptr->door_obstruction = 0;
-    ptr->overload = 0;
-    ptr->emergency_stop = 0;
-    ptr->individual_service_mode = 0;
-    ptr->emergency_mode = 0;
+    // Initialise the shared memory.
+    strcpy(car_shared_memory->current_floor, argv[2]);
+    strcpy(car_shared_memory->destination_floor, argv[2]);
+    strcpy(car_shared_memory->status, status_names[3]);
+    car_shared_memory->open_button = 0;
+    car_shared_memory->close_button = 0;
+    car_shared_memory->door_obstruction = 0;
+    car_shared_memory->overload = 0;
+    car_shared_memory->emergency_stop = 0;
+    car_shared_memory->individual_service_mode = 0;
+    car_shared_memory->emergency_mode = 0;
 
     pthread_t controller_thread;
     if (pthread_create(&controller_thread, NULL, connnect_to_controller, &car_info) != 0)
@@ -160,8 +170,47 @@ void *connnect_to_controller(void *arg)
     }
     char car_initialisation_message[256];
 
-    sscanf(car_initialisation_message, "CAR %s %s %s", car_info->name, car_info->lowest_floor, car_info->highest_floor);
+    sprintf(car_initialisation_message, "CAR %s %s %s", car_info->name, car_info->lowest_floor, car_info->highest_floor);
     send_message(sockfd, car_initialisation_message);
+
+    char status_initialisation_message[256];
+
+    car_shared_mem *shared_mem = car_info->ptr_to_shared_mem;
+
+    pthread_mutex_lock(&shared_mem->mutex);
+    sprintf(status_initialisation_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
+    pthread_mutex_unlock(&shared_mem->mutex);
+
+    send_message(sockfd, status_initialisation_message);
+
+    while (1)
+    {
+        char *message_from_controller = receive_msg(sockfd);
+
+        if (strncmp(message_from_controller, "FLOOR", 5) == 0)
+        {
+            char dispatch_floor[4];
+            sscanf(message_from_controller, "FLOOR %s", dispatch_floor);
+
+            pthread_mutex_lock(&shared_mem->mutex);
+            if (strcmp(shared_mem->current_floor, dispatch_floor) == 0)
+            {
+                reached_destination_floor(shared_mem);
+            }
+            else
+            {
+                strcpy(shared_mem->destination_floor, dispatch_floor);
+            }
+            pthread_mutex_unlock(&shared_mem->mutex);
+        }
+        else
+        {
+            break;
+        }
+
+        free(message_from_controller);
+    }
+
     pthread_exit(NULL);
 }
 
@@ -171,7 +220,7 @@ void *send_status_messages(void *arg)
     // STATUS {status} {current floor} {destination floor}
 
     // This message should be sent when:
-    // - Immediately after the car initialisation message
+    // - Immediately after the car initialisation message (complete).
     // - Everytime the shared memory changes (check condition variable)
     // - If delay (ms) has passed since the last message.
     pthread_exit(NULL);
@@ -183,14 +232,8 @@ void *normal_operation(void *arg)
     // - Change its status to Between
     // - Wait (delay) ms
     // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
-    // - If the current floor is now the destination floor:
-    //      - Change its status to Opening
-    //      - Wait (delay) ms
-    //      - Change its status to Open
-    //      - Wait (delay) ms
-    //      - Change its status to Closing
-    //      - Wait (delay) ms
-    //      - Change its status to Closed
+
+    // If the current floor and destination floor are equal, call "reached_destination_floor" function.
     pthread_exit(NULL);
 }
 
@@ -210,11 +253,51 @@ void *indiviudal_service_mode(void *arg)
     pthread_exit(NULL);
 }
 
+void reached_destination_floor(car_shared_mem *shared_mem)
+{
+    char *open_door_sequence[] = {"Opening", "Open", "Closing", "Closed"};
+    
+    for (int i = 0; i < 4;)
+    {
+        pthread_mutex_lock(&shared_mem->mutex);
+
+        strcpy(shared_mem->status, open_door_sequence[i]);
+        pthread_mutex_unlock(&shared_mem->mutex);
+
+        // Wait delay (ms)
+        usleep(1000);
+
+        pthread_mutex_lock(&shared_mem->mutex);
+
+        int status_changed = 0;
+        for (int j = 0; j < 4; j++)
+        {
+            if (strcmp(shared_mem->status, open_door_sequence[j]) == 0)
+            {
+                // If status changed, resume from the logical next step
+                if (j != i)
+                {
+                    i = j; // Move to the new step based on the updated status
+                    status_changed = 1;
+                }
+                break;
+            }
+        }
+        pthread_mutex_unlock(&shared_mem->mutex);
+
+        // If status didn't change, proceed to the next step in the normal sequence
+        if (!status_changed)
+        {
+            i++;
+        }
+    }
+}
+
 void terminate_shared_memory(int sig_num)
 {
     signal(SIGINT, terminate_shared_memory);
     // Unmap the shared memory
-    munmap(ptr, sizeof(car_shared_mem));
+    munmap(car_shared_memory, sizeof(car_shared_mem));
 
     // Close the file descriptor
     close(shm_fd);
