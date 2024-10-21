@@ -177,6 +177,39 @@ void *send_status_messages(void *arg)
     pthread_exit(NULL);
 }
 
+void *normal_operation(void *arg)
+{
+    // If the destination floor is different from the current floor and the doors are closed, the car will:
+    // - Change its status to Between
+    // - Wait (delay) ms
+    // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+    // - If the current floor is now the destination floor:
+    //      - Change its status to Opening
+    //      - Wait (delay) ms
+    //      - Change its status to Open
+    //      - Wait (delay) ms
+    //      - Change its status to Closing
+    //      - Wait (delay) ms
+    //      - Change its status to Closed
+    pthread_exit(NULL);
+}
+
+void *handle_button_press(void *arg)
+{
+    // If the open button is pressed:
+    // - If the status is Open the car should wait another (delay) ms before switching to Closing.
+    // - If the status is Closing or Closed the car should switch to Opening and repeat the steps from there
+    // - If the status is Opening or Between the button does nothing
+    // If the close button is pressed
+    // - If the status is Open the car should immediately switch to Closing
+    pthread_exit(NULL);
+}
+
+void *indiviudal_service_mode(void *arg)
+{
+    pthread_exit(NULL);
+}
+
 void terminate_shared_memory(int sig_num)
 {
     signal(SIGINT, terminate_shared_memory);
