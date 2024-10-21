@@ -45,10 +45,11 @@ typedef struct
 
 int shm_fd = -1;
 car_shared_mem *car_shared_memory; // Pointer to shared memory
+char car_name[100] = "/car";
 
 void terminate_shared_memory(int sig_num);
 void *connnect_to_controller(void *arg);
-void reached_destination_floor(car_shared_mem *shared_mem);
+void reached_destination_floor(car_shared_mem *shared_mem, int delay_ms);
 void traverse_car(car_shared_mem *shared_mem);
 
 int main(int argc, char **argv)
@@ -63,8 +64,6 @@ int main(int argc, char **argv)
 
     // Esnure the car doesn't crash when write fails.
     signal(SIGPIPE, SIG_IGN);
-
-    char car_name[100] = "/car";
 
     strcat(car_name, argv[1]);
 
@@ -162,7 +161,7 @@ void *connnect_to_controller(void *arg)
     }
     while (1)
     {
-        usleep(10000);
+        usleep(car_info->delay * 1000);
         if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == 0)
         {
             break;
@@ -195,7 +194,7 @@ void *connnect_to_controller(void *arg)
             pthread_mutex_lock(&shared_mem->mutex);
             if (strcmp(shared_mem->current_floor, dispatch_floor) == 0)
             {
-                reached_destination_floor(shared_mem);
+                reached_destination_floor(shared_mem, car_info->delay);
             }
             else
             {
@@ -239,12 +238,29 @@ void *normal_operation(void *arg)
 
 void *handle_button_press(void *arg)
 {
-    // If the open button is pressed:
-    // - If the status is Open the car should wait another (delay) ms before switching to Closing.
-    // - If the status is Closing or Closed the car should switch to Opening and repeat the steps from there
-    // - If the status is Opening or Between the button does nothing
-    // If the close button is pressed
-    // - If the status is Open the car should immediately switch to Closing
+    car_information *car_info = (car_information *)arg;
+    car_shared_mem *shared_mem = car_info->ptr_to_shared_mem;
+
+    while (1)
+    {
+        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+
+        pthread_mutex_lock(&shared_mem->mutex);
+        if (shared_mem->open_button == 1)
+        {
+            shared_mem->open_button = 0;
+            // - If the status is Open the car should wait another (delay) ms before switching to Closing.
+            // - If the status is Closing or Closed the car should switch to Opening and repeat the steps from there
+            // - If the status is Opening or Between the button does nothing
+        }
+
+        if (shared_mem->close_button == 1)
+        {
+            shared_mem->close_button = 0;
+            // - If the status is Open the car should immediately switch to Closing
+        }
+        pthread_mutex_lock(&shared_mem->mutex);
+    }
     pthread_exit(NULL);
 }
 
@@ -253,10 +269,10 @@ void *indiviudal_service_mode(void *arg)
     pthread_exit(NULL);
 }
 
-void reached_destination_floor(car_shared_mem *shared_mem)
+void reached_destination_floor(car_shared_mem *shared_mem, int delay_ms)
 {
     char *open_door_sequence[] = {"Opening", "Open", "Closing", "Closed"};
-    
+
     for (int i = 0; i < 4;)
     {
         pthread_mutex_lock(&shared_mem->mutex);
@@ -264,8 +280,7 @@ void reached_destination_floor(car_shared_mem *shared_mem)
         strcpy(shared_mem->status, open_door_sequence[i]);
         pthread_mutex_unlock(&shared_mem->mutex);
 
-        // Wait delay (ms)
-        usleep(1000);
+        usleep(delay_ms * 1000);
 
         pthread_mutex_lock(&shared_mem->mutex);
 
@@ -292,16 +307,15 @@ void reached_destination_floor(car_shared_mem *shared_mem)
         }
     }
 }
-
 void terminate_shared_memory(int sig_num)
 {
     signal(SIGINT, terminate_shared_memory);
-    // Unmap the shared memory
+
     munmap(car_shared_memory, sizeof(car_shared_mem));
 
-    // Close the file descriptor
     close(shm_fd);
 
-    shm_unlink("/carA");
+    shm_unlink(car_name);
+
     exit(0);
 }
