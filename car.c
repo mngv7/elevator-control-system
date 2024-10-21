@@ -8,11 +8,12 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
-#include <unistd.h>
 #include <errno.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <signal.h>
+#include "network_utils.h"
+#include <unistd.h>
 
 char *status_names[] = {
     "Opening", "Open", "Closing", "Closed", "Between"};
@@ -33,21 +34,19 @@ typedef struct
     uint8_t emergency_mode;          // 1 if in emergency mode, else 0
 } car_shared_mem;
 
-int shm_fd = -1;
-car_shared_mem *ptr;  // Pointer to shared memory
-
-void terminate_shared_memory(int sig_num)
+typedef struct
 {
-    signal(SIGINT, terminate_shared_memory);
-    // Unmap the shared memory
-    munmap(ptr, sizeof(car_shared_mem));
+    char name[100];
+    char lowest_floor[4];
+    char highest_floor[4];
+    int delay;
+} car_information;
 
-    // Close the file descriptor
-    close(shm_fd);
+int shm_fd = -1;
+car_shared_mem *ptr; // Pointer to shared memory
 
-    shm_unlink("/carA");
-    exit(0);
-}
+void terminate_shared_memory(int sig_num);
+void *connnect_to_controller(void *arg);
 
 int main(int argc, char **argv)
 {
@@ -58,6 +57,16 @@ int main(int argc, char **argv)
     }
 
     signal(SIGINT, terminate_shared_memory);
+
+    // Esnure the car doesn't crash when write fails.
+    signal(SIGPIPE, SIG_IGN);
+
+    car_information car_info;
+
+    strcpy(car_info.name, argv[1]);
+    strcpy(car_info.lowest_floor, argv[2]);
+    strcpy(car_info.highest_floor, argv[3]);
+    car_info.delay = atoi(argv[4]);
 
     // Unlink the shared memory incase it exists.
     shm_unlink("/carA");
@@ -107,7 +116,109 @@ int main(int argc, char **argv)
     ptr->individual_service_mode = 0;
     ptr->emergency_mode = 0;
 
+    pthread_t controller_thread;
+    if (pthread_create(&controller_thread, NULL, connnect_to_controller, &car_info) != 0)
+    {
+        perror("pthread_create()");
+        exit(EXIT_FAILURE);
+    }
+
     while (1)
         ;
     return 0;
+}
+
+void *connnect_to_controller(void *arg)
+{
+    car_information *car_info = (car_information *)arg;
+
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1)
+    {
+        perror("socket()");
+        exit(1);
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(3000);
+    const char *ipaddress = "127.0.0.1";
+
+    if (inet_pton(AF_INET, ipaddress, &addr.sin_addr) != 1)
+    {
+        fprintf(stderr, "inet_pton(%s)\n", ipaddress);
+        exit(1);
+    }
+    while (1)
+    {
+        usleep(10000);
+        if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == 0)
+        {
+            break;
+        }
+    }
+    char car_initialisation_message[256];
+
+    sscanf(car_initialisation_message, "CAR %s %s %s", car_info->name, car_info->lowest_floor, car_info->highest_floor);
+    send_message(sockfd, car_initialisation_message);
+    pthread_exit(NULL);
+}
+
+void *send_status_messages(void *arg)
+{
+    // Send messages in the form:
+    // STATUS {status} {current floor} {destination floor}
+
+    // This message should be sent when:
+    // - Immediately after the car initialisation message
+    // - Everytime the shared memory changes (check condition variable)
+    // - If delay (ms) has passed since the last message.
+    pthread_exit(NULL);
+}
+
+void *normal_operation(void *arg)
+{
+    // If the destination floor is different from the current floor and the doors are closed, the car will:
+    // - Change its status to Between
+    // - Wait (delay) ms
+    // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+    // - If the current floor is now the destination floor:
+    //      - Change its status to Opening
+    //      - Wait (delay) ms
+    //      - Change its status to Open
+    //      - Wait (delay) ms
+    //      - Change its status to Closing
+    //      - Wait (delay) ms
+    //      - Change its status to Closed
+    pthread_exit(NULL);
+}
+
+void *handle_button_press(void *arg)
+{
+    // If the open button is pressed:
+    // - If the status is Open the car should wait another (delay) ms before switching to Closing.
+    // - If the status is Closing or Closed the car should switch to Opening and repeat the steps from there
+    // - If the status is Opening or Between the button does nothing
+    // If the close button is pressed
+    // - If the status is Open the car should immediately switch to Closing
+    pthread_exit(NULL);
+}
+
+void *indiviudal_service_mode(void *arg)
+{
+    pthread_exit(NULL);
+}
+
+void terminate_shared_memory(int sig_num)
+{
+    signal(SIGINT, terminate_shared_memory);
+    // Unmap the shared memory
+    munmap(ptr, sizeof(car_shared_mem));
+
+    // Close the file descriptor
+    close(shm_fd);
+
+    shm_unlink("/carA");
+    exit(0);
 }
