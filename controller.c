@@ -19,6 +19,7 @@ typedef struct
     char highest_floor[5];
     char current_floor[4];     // New field for current floor
     char destination_floor[4]; // New field for destination floor
+    char status[8];
 } car_information;
 
 typedef struct
@@ -76,7 +77,7 @@ int main()
         perror("socket()");
         exit(EXIT_FAILURE);
     }
-    
+
     // Set socket options
     int opt_enable = 1;
     if (setsockopt(listensockfd, SOL_SOCKET, SO_REUSEADDR, &opt_enable, sizeof(opt_enable)) == -1)
@@ -232,28 +233,33 @@ void *status_checking_thread(void *arg)
     int car_clientfd = *((int *)arg);
     free(arg);
 
+    pthread_mutex_lock(&car_list_mutex);
+    CarNode *car_node = car_list_head;
+    while (car_node != NULL)
+    {
+        if (car_node->car_info.car_fd == car_clientfd)
+        {
+            break;
+        }
+        car_node = car_node->next;
+    }
+    pthread_mutex_unlock(&car_list_mutex);
+
+    char status[8];
+    char current_floor[4];
+    char destination_floor[4];
+    
     while (1)
     {
         char *msg = receive_msg(car_clientfd);
-        char status[8];
-        char current_floor[4];
-        char destination_floor[4];
+
         sscanf(msg, "STATUS %s %s %s", status, current_floor, destination_floor);
 
-        // Update car's current floor and destination floor
-        CarNode *car_node = car_list_head;
-        while (car_node != NULL)
-        {
-            if (car_node->car_info.car_fd == car_clientfd)
-            {
-                pthread_mutex_lock(&car_list_mutex);
-                strcpy(car_node->car_info.current_floor, current_floor);
-                strcpy(car_node->car_info.destination_floor, destination_floor);
-                pthread_mutex_unlock(&car_list_mutex);
-                break;
-            }
-            car_node = car_node->next;
-        }
+        pthread_mutex_lock(&car_list_mutex);
+        strcpy(car_node->car_info.current_floor, current_floor);
+        strcpy(car_node->car_info.destination_floor, destination_floor);
+        strcpy(car_node->car_info.status, status);
+        pthread_mutex_unlock(&car_list_mutex);
 
         // Check for emergency or individual service messages
         if (strcmp(msg, "EMERGENCY") == 0 || strcmp(msg, "INDIVIDUAL SERVICE") == 0)
@@ -309,7 +315,8 @@ void *handle_car(void *arg)
 
         char *next_stop = get_and_pop_first_stop(car_clientfd);
 
-        if (strcmp(car_node->car_info.current_floor, car_node->car_info.destination_floor) == 0)
+        if ((strcmp(car_node->car_info.current_floor, car_node->car_info.destination_floor) == 0) ||
+            (strcmp(car_node->car_info.status, "Opening") == 0))
         {
             if (strcmp(next_stop, "E") != 0) // If there's a valid next stop
             {
