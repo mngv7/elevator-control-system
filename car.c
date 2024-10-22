@@ -56,10 +56,8 @@ car_shared_mem *car_shared_memory; // Pointer to shared memory
 char car_name[100] = "/car";
 
 void terminate_shared_memory(int sig_num);
-void *connnect_to_controller(void *arg);
-void *opening_to_closed_sequence_thread(void *arg);
+void opening_to_closed_sequence(car_information *car_info, int delay_ms);
 void *handle_button_press(void *arg);
-void traverse_car(car_shared_mem *shared_mem);
 
 int main(int argc, char **argv)
 {
@@ -134,13 +132,6 @@ int main(int argc, char **argv)
     car_shared_memory->individual_service_mode = 0;
     car_shared_memory->emergency_mode = 0;
 
-    pthread_t controller_thread;
-    if (pthread_create(&controller_thread, NULL, connnect_to_controller, &car_info) != 0)
-    {
-        perror("pthread_create()");
-        exit(EXIT_FAILURE);
-    }
-
     // Create handle button press thread here
     pthread_t button_thread;
     if (pthread_create(&button_thread, NULL, handle_button_press, &car_info) != 0)
@@ -165,44 +156,9 @@ void *handle_button_press(void *arg)
 
         pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
 
-        if (shared_mem->open_button == 1)
-        {
-            shared_mem->open_button = 0;
-            if (strcmp(shared_mem->status, "Open") == 0)
-            {
-                // - If the status is Open the car should wait another (delay) ms before switching to Closing.
-                
-            }
-
-            if ((strcmp(shared_mem->status, "Closing") == 0) ||
-                (strcmp(shared_mem->status, "Closed") == 0))
-            {
-                pthread_mutex_unlock(&shared_mem->mutex);
-
-                // Allocate memory for the thread arguments
-                reached_floor_args *args = malloc(sizeof(reached_floor_args));
-                args->shared_mem = shared_mem;
-                args->delay_ms = car_info->delay;
-
-                // Create the thread
-                pthread_t reached_floor_thread;
-                if (pthread_create(&reached_floor_thread, NULL, opening_to_closed_sequence_thread, args) != 0)
-                {
-                    perror("pthread_create for reached_destination_floor");
-                    exit(EXIT_FAILURE);
-                }
-
-                // Detach the thread so it cleans up after finishing
-                pthread_detach(reached_floor_thread);
-
-                pthread_mutex_lock(&shared_mem->mutex);
-            }
-
-            // - If the status is Opening or Between the button does nothing
-        }
-
         if (shared_mem->close_button == 1)
         {
+            printf("Closed button pressed!\n");
             shared_mem->close_button = 0;
             if (strcmp(shared_mem->status, "Open") == 0)
             {
@@ -210,123 +166,38 @@ void *handle_button_press(void *arg)
                 strcpy(shared_mem->status, "Closing");
             }
         }
+
+        if (shared_mem->open_button == 1)
+        {
+            shared_mem->open_button = 0;
+            if (strcmp(shared_mem->status, "Open") == 0)
+            {
+                // - If the status is Open the car should wait another (delay) ms before switching to Closing.
+                usleep(car_info->delay * MILLISECOND);
+                strcpy(shared_mem->status, "Closing");
+            }
+
+            if ((strcmp(shared_mem->status, "Closing") == 0) ||
+                (strcmp(shared_mem->status, "Closed") == 0))
+            {
+                pthread_mutex_unlock(&shared_mem->mutex);
+
+                opening_to_closed_sequence(car_info, car_info->delay);
+
+                pthread_mutex_lock(&shared_mem->mutex);
+            }
+
+            // - If the status is Opening or Between the button does nothing
+        }
+
         pthread_mutex_unlock(&shared_mem->mutex);
     }
     pthread_exit(NULL);
 }
 
-void *connnect_to_controller(void *arg)
+void opening_to_closed_sequence(car_information *car_info, int delay_ms)
 {
-    car_information *car_info = (car_information *)arg;
-
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1)
-    {
-        perror("socket()");
-        exit(1);
-    }
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(3000);
-    const char *ipaddress = "127.0.0.1";
-
-    if (inet_pton(AF_INET, ipaddress, &addr.sin_addr) != 1)
-    {
-        fprintf(stderr, "inet_pton(%s)\n", ipaddress);
-        exit(1);
-    }
-    while (1)
-    {
-        usleep(car_info->delay * 1000);
-        if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == 0)
-        {
-            break;
-        }
-    }
-    char car_initialisation_message[256];
-
-    sprintf(car_initialisation_message, "CAR %s %s %s", car_info->name, car_info->lowest_floor, car_info->highest_floor);
-    send_message(sockfd, car_initialisation_message);
-
-    char status_initialisation_message[256];
-
     car_shared_mem *shared_mem = car_info->ptr_to_shared_mem;
-
-    pthread_mutex_lock(&shared_mem->mutex);
-    sprintf(status_initialisation_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
-    pthread_mutex_unlock(&shared_mem->mutex);
-
-    send_message(sockfd, status_initialisation_message);
-
-    while (1)
-    {
-        char *message_from_controller = receive_msg(sockfd);
-
-        if (strncmp(message_from_controller, "FLOOR", 5) == 0)
-        {
-            char dispatch_floor[4];
-            sscanf(message_from_controller, "FLOOR %s", dispatch_floor); // New floor call.
-
-            pthread_mutex_lock(&shared_mem->mutex);
-            if (strcmp(shared_mem->current_floor, dispatch_floor) == 0) // If the car is already on that floor.
-            {
-                //reached_destination_floor(shared_mem, car_info->delay); // Open and close the doors.
-            }
-            else // Set the new destination floor.
-            {
-                if (strcmp(shared_mem->status, "Between") != 0) // If a new destination arrives while the car is in the Between status, that destination will not replace the car's current destination until the car reaches the next floor.
-                {
-                    strcpy(shared_mem->destination_floor, dispatch_floor);
-                }
-            }
-            pthread_mutex_unlock(&shared_mem->mutex);
-        }
-        else
-        {
-            break;
-        }
-
-        free(message_from_controller);
-    }
-
-    pthread_exit(NULL);
-}
-
-void *send_status_messages(void *arg)
-{
-    // Send messages in the form:
-    // STATUS {status} {current floor} {destination floor}
-
-    // This message should be sent when:
-    // - Immediately after the car initialisation message (complete).
-    // - Everytime the shared memory changes (check condition variable)
-    // - If delay (ms) has passed since the last message.
-    pthread_exit(NULL);
-}
-
-void *normal_operation(void *arg)
-{
-    // If the destination floor is different from the current floor and the doors are closed, the car will:
-    // - Change its status to Between
-    // - Wait (delay) ms
-    // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
-
-    // If the current floor and destination floor are equal, call "reached_destination_floor" function.
-    pthread_exit(NULL);
-}
-
-void *indiviudal_service_mode(void *arg)
-{
-    pthread_exit(NULL);
-}
-
-void *opening_to_closed_sequence_thread(void *arg)
-{
-    reached_floor_args *args = (reached_floor_args *)arg;
-    car_shared_mem *shared_mem = args->shared_mem;
-    int delay_ms = args->delay_ms;
 
     // Step 1: Change status to "Opening"
     pthread_mutex_lock(&shared_mem->mutex);
@@ -351,8 +222,6 @@ void *opening_to_closed_sequence_thread(void *arg)
     strcpy(shared_mem->status, "Closed");
     pthread_mutex_unlock(&shared_mem->mutex);
 
-    // Free the argument structure and exit the thread
-    free(args);
     pthread_exit(NULL);
 }
 
