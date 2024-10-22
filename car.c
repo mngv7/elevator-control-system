@@ -78,8 +78,6 @@ int main(int argc, char **argv)
     // Unlink the shared memory incase it exists.
     shm_unlink(car_name);
 
-    printf("The name of the shared memory is: '%s'\n", car_name);
-
     shm_fd = shm_open(car_name, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1)
     {
@@ -128,12 +126,12 @@ int main(int argc, char **argv)
     car_shared_memory->individual_service_mode = 0;
     car_shared_memory->emergency_mode = 0;
 
-    /*pthread_t controller_thread;
+    pthread_t controller_thread;
     if (pthread_create(&controller_thread, NULL, connnect_to_controller, &car_info) != 0)
     {
         perror("pthread_create()");
         exit(EXIT_FAILURE);
-    }*/
+    }
 
     // Create handle button press thread here
     pthread_t button_thread;
@@ -155,17 +153,12 @@ void *handle_button_press(void *arg)
 
     while (1)
     {
-        printf("Waiting for broadcast...\n");
-        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
-        printf("Broadcast received!\n");
-
-        printf("Attempting to lock mutex...\n");
         pthread_mutex_lock(&shared_mem->mutex);
-        printf("Mutex locked!\n");
+
+        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
 
         if (shared_mem->open_button == 1)
         {
-            printf("Detected open button pushed\n");
             shared_mem->open_button = 0;
             if (strcmp(shared_mem->status, "Open") == 0)
             {
