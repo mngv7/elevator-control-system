@@ -168,7 +168,11 @@ void *handle_button_press(void *arg)
             if ((strcmp(shared_mem->status, "Closing") == 0) ||
                 (strcmp(shared_mem->status, "Closed") == 0))
             {
-                // - If the status is Closing or Closed the car should switch to Opening and repeat the steps from there
+                pthread_mutex_unlock(&shared_mem->mutex);
+
+                reached_destination_floor(shared_mem, car_info->delay);
+
+                pthread_mutex_lock(&shared_mem->mutex);
             }
 
             // - If the status is Opening or Between the button does nothing
@@ -298,7 +302,6 @@ void *indiviudal_service_mode(void *arg)
 void reached_destination_floor(car_shared_mem *shared_mem, int delay_ms)
 {
     char *open_door_sequence[] = {"Opening", "Open", "Closing", "Closed"};
-
     for (int i = 0; i < 4;)
     {
         pthread_mutex_lock(&shared_mem->mutex);
