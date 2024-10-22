@@ -14,6 +14,8 @@
 #include <signal.h>
 #include "network_utils.h"
 #include <unistd.h>
+#include <time.h>
+#include <sys/time.h>
 
 #define MILLISECOND 1000
 
@@ -56,8 +58,9 @@ car_shared_mem *car_shared_memory; // Pointer to shared memory
 char car_name[100] = "/car";
 
 void terminate_shared_memory(int sig_num);
-void opening_to_closed_sequence(car_information *car_info, int delay_ms);
+void opening_to_closed_sequence(car_information *car_info);
 void *handle_button_press(void *arg);
+void delay(car_information *car_info);
 
 int main(int argc, char **argv)
 {
@@ -173,7 +176,7 @@ void *handle_button_press(void *arg)
             if (strcmp(shared_mem->status, "Open") == 0)
             {
                 // - If the status is Open the car should wait another (delay) ms before switching to Closing.
-                usleep(car_info->delay * MILLISECOND);
+                delay(car_info);
                 strcpy(shared_mem->status, "Closing");
             }
 
@@ -182,7 +185,7 @@ void *handle_button_press(void *arg)
             {
                 pthread_mutex_unlock(&shared_mem->mutex);
 
-                opening_to_closed_sequence(car_info, car_info->delay);
+                opening_to_closed_sequence(car_info);
 
                 pthread_mutex_lock(&shared_mem->mutex);
             }
@@ -195,31 +198,57 @@ void *handle_button_press(void *arg)
     pthread_exit(NULL);
 }
 
-void opening_to_closed_sequence(car_information *car_info, int delay_ms)
+void delay(car_information *car_info)
+{
+    const int time_in_ms = car_info->delay;
+    struct timespec ts;
+    int rt = 0;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += time_in_ms / 1000;
+
+    do
+    {
+        rt = pthread_cond_timedwait(&car_info->ptr_to_shared_mem->cond, &car_info->ptr_to_shared_mem->mutex, &ts);
+    } while (rt == 0);
+}
+
+void opening_to_closed_sequence(car_information *car_info)
 {
     car_shared_mem *shared_mem = car_info->ptr_to_shared_mem;
 
     // Step 1: Change status to "Opening"
+    printf("Attempting to open...\n");
     pthread_mutex_lock(&shared_mem->mutex);
     strcpy(shared_mem->status, "Opening");
+    printf("Changed status to Opening\n");
     pthread_mutex_unlock(&shared_mem->mutex);
-    usleep(delay_ms * MILLISECOND);
+
+    delay(car_info); // Wait before opening fully
 
     // Step 2: Change status to "Open"
+    printf("Attempting to open fully...\n");
     pthread_mutex_lock(&shared_mem->mutex);
     strcpy(shared_mem->status, "Open");
+    printf("Changed status to Open\n");
     pthread_mutex_unlock(&shared_mem->mutex);
-    usleep(delay_ms * MILLISECOND);
+
+    delay(car_info); // Wait before closing
 
     // Step 3: Change status to "Closing"
+    printf("Attempting to close...\n");
     pthread_mutex_lock(&shared_mem->mutex);
     strcpy(shared_mem->status, "Closing");
+    printf("Changed status to Closing\n");
     pthread_mutex_unlock(&shared_mem->mutex);
-    usleep(delay_ms * MILLISECOND);
+
+    delay(car_info); // Wait before closed
 
     // Step 4: Change status to "Closed"
+    printf("Attempting to close...\n");
     pthread_mutex_lock(&shared_mem->mutex);
     strcpy(shared_mem->status, "Closed");
+    printf("Changed status to Closed\n");
     pthread_mutex_unlock(&shared_mem->mutex);
 
     pthread_exit(NULL);
