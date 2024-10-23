@@ -188,11 +188,13 @@ void *handle_button_press(void *arg)
 
             if (strcmp(shared_mem->status, "Open") == 0)
             {
+                printf("--- Close button received!\n");
                 strcpy(shared_mem->status, "Closing");
-
+                printf("--- Changed status to closing!\n");
                 pthread_mutex_unlock(&shared_mem->mutex);
                 pthread_mutex_lock(&status_change_mutex);
                 pthread_cond_signal(&status_change_cond);
+                printf("--- Cond variable successfully signaled!\n");
                 pthread_mutex_unlock(&status_change_mutex);
                 continue;
             }
@@ -232,10 +234,14 @@ void *go_through_sequence(void *arg)
 
         if (strcmp(shared_mem->status, "Closing") == 0)
         {
+            printf("--- Attempting to change status to closed...\n");
             pthread_mutex_unlock(&shared_mem->mutex);
+            printf("--- Starting delay...\n");
             delay();
+            printf("--- Delay complete!\n");
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Closed");
+            printf("--- Status set to closed!\n");
         }
 
         pthread_mutex_unlock(&shared_mem->mutex);
@@ -248,7 +254,7 @@ void *go_through_sequence(void *arg)
 void delay()
 {
     const int time_in_ms = car_info.delay;
-    struct timespec ts, start_time;
+    struct timespec ts, start_time, end_time;
     int rt = 0;
 
     // Get the start time
@@ -272,7 +278,23 @@ void delay()
         rt = pthread_cond_timedwait(&shared_mem->cond, &shared_mem->mutex, &ts);
     } while (rt == 0);
     pthread_mutex_unlock(&shared_mem->mutex);
+
+    // Get the end time
+    clock_gettime(CLOCK_REALTIME, &end_time);
+
+    // Calculate the elapsed time
+    long seconds = end_time.tv_sec - start_time.tv_sec;
+    long nanoseconds = end_time.tv_nsec - start_time.tv_nsec;
+    if (nanoseconds < 0)
+    {
+        seconds -= 1;
+        nanoseconds += 1000000000;
+    }
+    long elapsed_ms = seconds * 1000 + nanoseconds / 1000000;
+    
+    printf("--- Delay expected: %d ms, actual: %ld ms\n", time_in_ms, elapsed_ms);
 }
+
 
 void terminate_shared_memory(int sig_num)
 {
