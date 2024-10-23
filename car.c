@@ -173,9 +173,9 @@ void *handle_button_press(void *arg)
 
             if (strcmp(shared_mem->status, "Closing") == 0 || strcmp(shared_mem->status, "Closed") == 0)
             {
-                printf("--- Open button received!\n");
+                //printf("--- Open button received!\n");
                 strcpy(shared_mem->status, "Opening");
-                printf("--- Changed status to Opening!\n");
+                //printf("--- Changed status to Opening!\n");
 
                 pthread_mutex_unlock(&shared_mem->mutex);
                 pthread_mutex_lock(&status_change_mutex);
@@ -190,9 +190,9 @@ void *handle_button_press(void *arg)
 
             if (strcmp(shared_mem->status, "Open") == 0)
             {
-                printf("--- Close button received!\n");
+                //printf("--- Close button received!\n");
                 strcpy(shared_mem->status, "Closing");
-                printf("--- Changed status to closing!\n");
+                //printf("--- Changed status to closing!\n");
                 
                 pthread_mutex_unlock(&shared_mem->mutex);
                 pthread_mutex_lock(&status_change_mutex);
@@ -217,7 +217,7 @@ void *go_through_sequence(void *arg)
         pthread_cond_wait(&status_change_cond, &status_change_mutex);
 
         pthread_mutex_lock(&shared_mem->mutex);
-        printf("=== Signal received, checking status for changes...\n");
+        //printf("=== Signal received, checking status for changes...\n");
 
         if (strcmp(shared_mem->status, "Opening") == 0)
         {
@@ -237,17 +237,122 @@ void *go_through_sequence(void *arg)
 
         if (strcmp(shared_mem->status, "Closing") == 0)
         {
-            printf("--- Attempting to change status to closed...\n");
+            //printf("--- Attempting to change status to closed...\n");
             pthread_mutex_unlock(&shared_mem->mutex);
-            printf("--- Starting delay...\n");
+            //printf("--- Starting delay...\n");
             delay();
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Closed");
-            printf("--- Status set to closed!\n");
+            //printf("--- Status set to closed!\n");
         }
 
         pthread_mutex_unlock(&shared_mem->mutex);
         pthread_mutex_unlock(&status_change_mutex);
+    }
+
+    pthread_exit(NULL);
+}
+
+void *send_status_messages(void *arg)
+{
+    // Send messages in the form:
+    // STATUS {status} {current floor} {destination floor}
+
+    // This message should be sent when:
+    // - Immediately after the car initialisation message (complete).
+    // - Everytime the shared memory changes (check condition variable)
+    // - If delay (ms) has passed since the last message.
+    pthread_exit(NULL);
+}
+
+void *normal_operation(void *arg)
+{
+    // If the destination floor is different from the current floor and the doors are closed, the car will:
+    // - Change its status to Between
+    // - Wait (delay) ms
+    // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+
+    // If the current floor and destination floor are equal, call "reached_destination_floor" function.
+    pthread_exit(NULL);
+}
+
+void *indiviudal_service_mode(void *arg)
+{
+    pthread_exit(NULL);
+}
+
+void *connnect_to_controller(void *arg)
+{
+    car_information *car_info = (car_information *)arg;
+
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1)
+    {
+        perror("socket()");
+        exit(1);
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(3000);
+    const char *ipaddress = "127.0.0.1";
+
+    if (inet_pton(AF_INET, ipaddress, &addr.sin_addr) != 1)
+    {
+        fprintf(stderr, "inet_pton(%s)\n", ipaddress);
+        exit(1);
+    }
+    while (1)
+    {
+        usleep(car_info->delay * 1000);
+        if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == 0)
+        {
+            break;
+        }
+    }
+    char car_initialisation_message[256];
+
+    sprintf(car_initialisation_message, "CAR %s %s %s", car_info->name, car_info->lowest_floor, car_info->highest_floor);
+    send_message(sockfd, car_initialisation_message);
+
+    char status_initialisation_message[256];
+
+    pthread_mutex_lock(&shared_mem->mutex);
+    sprintf(status_initialisation_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
+    pthread_mutex_unlock(&shared_mem->mutex);
+
+    send_message(sockfd, status_initialisation_message);
+
+    while (1)
+    {
+        char *message_from_controller = receive_msg(sockfd);
+
+        if (strncmp(message_from_controller, "FLOOR", 5) == 0)
+        {
+            char dispatch_floor[4];
+            sscanf(message_from_controller, "FLOOR %s", dispatch_floor); // New floor call.
+
+            pthread_mutex_lock(&shared_mem->mutex);
+            if (strcmp(shared_mem->current_floor, dispatch_floor) == 0) // If the car is already on that floor.
+            {
+                //reached_destination_floor(shared_mem, car_info->delay); // Open and close the doors.
+            }
+            else // Set the new destination floor.
+            {
+                if (strcmp(shared_mem->status, "Between") != 0) // If a new destination arrives while the car is in the Between status, that destination will not replace the car's current destination until the car reaches the next floor.
+                {
+                    strcpy(shared_mem->destination_floor, dispatch_floor);
+                }
+            }
+            pthread_mutex_unlock(&shared_mem->mutex);
+        }
+        else
+        {
+            break;
+        }
+
+        free(message_from_controller);
     }
 
     pthread_exit(NULL);
@@ -292,9 +397,9 @@ void delay()
         seconds -= 1;
         nanoseconds += 1000000000;
     }
-    long elapsed_ms = seconds * 1000 + nanoseconds / 1000000;
+    //long elapsed_ms = seconds * 1000 + nanoseconds / 1000000;
     
-    printf("--- Delay expected: %d ms, actual: %ld ms\n", time_in_ms, elapsed_ms);
+    //printf("--- Delay expected: %d ms, actual: %ld ms\n", time_in_ms, elapsed_ms);
 }
 
 
