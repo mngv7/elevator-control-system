@@ -19,6 +19,22 @@
 
 #define MILLISECOND 1000
 
+typedef struct
+{
+    pthread_mutex_t mutex;           // Locked while accessing struct contents
+    pthread_cond_t cond;             // Signalled when the contents change
+    char current_floor[4];           // C string in the range B99-B1 and 1-999
+    char destination_floor[4];       // Same format as above
+    char status[8];                  // C string indicating the elevator's status
+    uint8_t open_button;             // 1 if open doors button is pressed, else 0
+    uint8_t close_button;            // 1 if close doors button is pressed, else 0
+    uint8_t door_obstruction;        // 1 if obstruction detected, else 0
+    uint8_t overload;                // 1 if overload detected
+    uint8_t emergency_stop;          // 1 if stop button has been pressed, else 0
+    uint8_t individual_service_mode; // 1 if in individual service mode, else 0
+    uint8_t emergency_mode;          // 1 if in emergency mode, else 0
+} car_shared_mem;
+
 char *status_names[] = {
     "Opening", "Open", "Closing", "Closed", "Between"};
 
@@ -135,7 +151,7 @@ int main(int argc, char **argv)
 
 void *handle_button_press(void *arg)
 {
-    (void)arg; // Unused argument.
+    (void)arg;
 
     while (1)
     {
@@ -184,7 +200,7 @@ void *go_through_sequence(void *arg)
         {
             pthread_mutex_unlock(&shared_mem->mutex);
 
-            delay();  
+            delay();
 
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Open");
@@ -215,7 +231,6 @@ void *go_through_sequence(void *arg)
 
     pthread_exit(NULL);
 }
-
 
 void delay()
 {
@@ -249,11 +264,11 @@ void delay()
     clock_gettime(CLOCK_REALTIME, &end_time);
 
     // Calculate the actual delay duration in milliseconds
-    long actual_delay_ms = (end_time.tv_sec - start_time.tv_sec) * 1000 +
-                           (end_time.tv_nsec - start_time.tv_nsec) / 1000000;
+    // long actual_delay_ms = (end_time.tv_sec - start_time.tv_sec) * 1000 +
+    //(end_time.tv_nsec - start_time.tv_nsec) / 1000000;
 
     // Print the debugging information
-    //printf(">>> Requested delay: %d ms, Actual delay: %ld ms\n", time_in_ms, actual_delay_ms);
+    // printf(">>> Requested delay: %d ms, Actual delay: %ld ms\n", time_in_ms, actual_delay_ms);
 }
 
 void terminate_shared_memory(int sig_num)

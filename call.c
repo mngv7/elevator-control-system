@@ -10,9 +10,74 @@
 #include <unistd.h>
 #include <errno.h>
 #include <ctype.h>
-#include "network_utils.h"
 
 #define BUFFER_SIZE 1024
+
+void send_looped(int fd, const void *buf, size_t sz)
+{
+    const char *ptr = buf;
+    size_t remain = sz;
+
+    while (remain > 0)
+    {
+        ssize_t sent = write(fd, ptr, remain);
+        if (sent == -1)
+        {
+            perror("write()");
+            exit(EXIT_FAILURE);
+        }
+        ptr += sent;
+        remain -= sent;
+    }
+}
+
+void send_message(int fd, const char *buf)
+{
+    uint32_t len = htonl(strlen(buf));
+    send_looped(fd, &len, sizeof(len));
+    send_looped(fd, buf, strlen(buf));
+}
+
+void recv_looped(int fd, void *buf, size_t sz)
+{
+    char *ptr = buf;
+    size_t remain = sz;
+
+    while (remain > 0)
+    {
+        ssize_t received = read(fd, ptr, remain);
+        if (received == -1)
+        {
+            perror("read()");
+            exit(EXIT_FAILURE);
+        }
+        else if (received == 0)
+        {
+            // Server closed the connection
+            fprintf(stderr, "Server closed the connection unexpectedly.\n");
+            exit(EXIT_FAILURE);
+        }
+        ptr += received;
+        remain -= received;
+    }
+}
+
+char *rcv_controller_message(int fd)
+{
+    uint32_t nlen;
+    recv_looped(fd, &nlen, sizeof(nlen));
+    uint32_t len = ntohl(nlen);
+
+    char *buf = malloc(len + 1);
+    if (buf == NULL)
+    {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+    buf[len] = '\0'; // Null-terminate the string
+    recv_looped(fd, buf, len);
+    return buf;
+}
 
 int establish_connection()
 {
@@ -96,7 +161,7 @@ int main(int argc, char **argv)
     send_message(sockfd, sendbuf);
 
     // Receive the first response.
-    char *msg = receive_msg(sockfd);
+    char *msg = rcv_controller_message(sockfd);
     fflush(stdout);
 
     if (strncmp(msg, "UNAVAILABLE", 11) == 0)
