@@ -149,6 +149,7 @@ void *handle_button_press(void *arg)
             // Handle Closing and Closed statuses
             if (strcmp(shared_mem->status, "Closing") == 0 || strcmp(shared_mem->status, "Closed") == 0)
             {
+                printf("~~~ Door is closed or closing!\n");
                 pthread_t sequence_thread; // Create a new thread for the sequence
                 if (pthread_create(&sequence_thread, NULL, opening_to_closed_sequence, NULL) != 0)
                 {
@@ -167,12 +168,42 @@ void *handle_button_press(void *arg)
 
             if (strcmp(shared_mem->status, "Open") == 0)
             {
+                printf("~~~ Open to closing!\n");
                 strcpy(shared_mem->status, "Closing");
             }
         }
 
         pthread_mutex_unlock(&shared_mem->mutex);
     }
+    pthread_exit(NULL);
+}
+
+void *opening_to_closed_sequence(void *arg)
+{
+    (void)arg; // Unused argument.
+
+    pthread_mutex_lock(&shared_mem->mutex);
+    strcpy(shared_mem->status, "Opening");
+    pthread_mutex_unlock(&shared_mem->mutex);
+
+    delay();
+
+    pthread_mutex_lock(&shared_mem->mutex);
+    strcpy(shared_mem->status, "Open");
+    pthread_mutex_unlock(&shared_mem->mutex);
+
+    delay();
+
+    pthread_mutex_lock(&shared_mem->mutex);
+    strcpy(shared_mem->status, "Closing");
+    pthread_mutex_unlock(&shared_mem->mutex);
+
+    delay();
+
+    pthread_mutex_lock(&shared_mem->mutex);
+    strcpy(shared_mem->status, "Closed");
+    pthread_mutex_unlock(&shared_mem->mutex);
+
     pthread_exit(NULL);
 }
 
@@ -208,41 +239,11 @@ void delay()
     clock_gettime(CLOCK_REALTIME, &end_time);
 
     // Calculate the actual delay duration in milliseconds
-    long actual_delay_ms = (end_time.tv_sec - start_time.tv_sec) * 1000 + 
+    long actual_delay_ms = (end_time.tv_sec - start_time.tv_sec) * 1000 +
                            (end_time.tv_nsec - start_time.tv_nsec) / 1000000;
 
     // Print the debugging information
     printf(">>> Requested delay: %d ms, Actual delay: %ld ms\n", time_in_ms, actual_delay_ms);
-}
-
-
-void *opening_to_closed_sequence(void *arg)
-{
-    (void)arg; // Unused argument.
-
-    pthread_mutex_lock(&shared_mem->mutex);
-    strcpy(shared_mem->status, "Opening");
-    pthread_mutex_unlock(&shared_mem->mutex);
-
-    delay();
-
-    pthread_mutex_lock(&shared_mem->mutex);
-    strcpy(shared_mem->status, "Open");
-    pthread_mutex_unlock(&shared_mem->mutex);
-
-    delay();
-
-    pthread_mutex_lock(&shared_mem->mutex);
-    strcpy(shared_mem->status, "Closing");
-    pthread_mutex_unlock(&shared_mem->mutex);
-
-    delay();
-
-    pthread_mutex_lock(&shared_mem->mutex);
-    strcpy(shared_mem->status, "Closed");
-    pthread_mutex_unlock(&shared_mem->mutex);
-
-    pthread_exit(NULL);
 }
 
 void terminate_shared_memory(int sig_num)
