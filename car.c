@@ -204,51 +204,46 @@ void delay(car_information *car_info)
     struct timespec ts;
     int rt = 0;
 
+    // Get the current time
     clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += time_in_ms / 1000;
+    
+    // Calculate total time in seconds and nanoseconds
+    ts.tv_sec += time_in_ms / 1000;                // Add whole seconds
+    ts.tv_nsec += (time_in_ms % 1000) * 1000000;  // Add remaining milliseconds in nanoseconds
 
+    pthread_mutex_lock(&car_info->ptr_to_shared_mem->mutex);
     do
     {
         rt = pthread_cond_timedwait(&car_info->ptr_to_shared_mem->cond, &car_info->ptr_to_shared_mem->mutex, &ts);
     } while (rt == 0);
+    pthread_mutex_unlock(&car_info->ptr_to_shared_mem->mutex);
 }
+
 
 void opening_to_closed_sequence(car_information *car_info)
 {
     car_shared_mem *shared_mem = car_info->ptr_to_shared_mem;
 
-    // Step 1: Change status to "Opening"
-    printf("Attempting to open...\n");
     pthread_mutex_lock(&shared_mem->mutex);
     strcpy(shared_mem->status, "Opening");
-    printf("Changed status to Opening\n");
     pthread_mutex_unlock(&shared_mem->mutex);
 
     delay(car_info); // Wait before opening fully
 
-    // Step 2: Change status to "Open"
-    printf("Attempting to open fully...\n");
     pthread_mutex_lock(&shared_mem->mutex);
     strcpy(shared_mem->status, "Open");
-    printf("Changed status to Open\n");
     pthread_mutex_unlock(&shared_mem->mutex);
 
     delay(car_info); // Wait before closing
 
-    // Step 3: Change status to "Closing"
-    printf("Attempting to close...\n");
     pthread_mutex_lock(&shared_mem->mutex);
     strcpy(shared_mem->status, "Closing");
-    printf("Changed status to Closing\n");
     pthread_mutex_unlock(&shared_mem->mutex);
 
     delay(car_info); // Wait before closed
 
-    // Step 4: Change status to "Closed"
-    printf("Attempting to close...\n");
     pthread_mutex_lock(&shared_mem->mutex);
     strcpy(shared_mem->status, "Closed");
-    printf("Changed status to Closed\n");
     pthread_mutex_unlock(&shared_mem->mutex);
 
     pthread_exit(NULL);
