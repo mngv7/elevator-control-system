@@ -173,7 +173,9 @@ void *handle_button_press(void *arg)
 
             if (strcmp(shared_mem->status, "Closing") == 0 || strcmp(shared_mem->status, "Closed") == 0)
             {
+                printf("--- Open button received!\n");
                 strcpy(shared_mem->status, "Opening");
+                printf("--- Changed status to Opening!\n");
 
                 pthread_mutex_unlock(&shared_mem->mutex);
                 pthread_mutex_lock(&status_change_mutex);
@@ -191,10 +193,10 @@ void *handle_button_press(void *arg)
                 printf("--- Close button received!\n");
                 strcpy(shared_mem->status, "Closing");
                 printf("--- Changed status to closing!\n");
+                
                 pthread_mutex_unlock(&shared_mem->mutex);
                 pthread_mutex_lock(&status_change_mutex);
                 pthread_cond_signal(&status_change_cond);
-                printf("--- Cond variable successfully signaled!\n");
                 pthread_mutex_unlock(&status_change_mutex);
                 continue;
             }
@@ -215,6 +217,7 @@ void *go_through_sequence(void *arg)
         pthread_cond_wait(&status_change_cond, &status_change_mutex);
 
         pthread_mutex_lock(&shared_mem->mutex);
+        printf("=== Signal received, checking status for changes...\n");
 
         if (strcmp(shared_mem->status, "Opening") == 0)
         {
@@ -238,7 +241,6 @@ void *go_through_sequence(void *arg)
             pthread_mutex_unlock(&shared_mem->mutex);
             printf("--- Starting delay...\n");
             delay();
-            printf("--- Delay complete!\n");
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Closed");
             printf("--- Status set to closed!\n");
