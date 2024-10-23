@@ -47,6 +47,9 @@ typedef struct
     int delay;
 } car_information;
 
+pthread_cond_t status_change_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t status_change_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // Global variables:
 car_shared_mem *shared_mem;
 car_information car_info;
@@ -119,7 +122,7 @@ int main(int argc, char **argv)
     // Initialize the shared memory.
     strcpy(shared_mem->current_floor, argv[2]);
     strcpy(shared_mem->destination_floor, argv[2]);
-    strcpy(shared_mem->status, status_names[3]);
+    strcpy(shared_mem->status, status_names[3]); // Initially "Closed"
     shared_mem->open_button = 0;
     shared_mem->close_button = 0;
     shared_mem->door_obstruction = 0;
@@ -128,7 +131,7 @@ int main(int argc, char **argv)
     shared_mem->individual_service_mode = 0;
     shared_mem->emergency_mode = 0;
 
-    // Create handle button press thread here
+    // Create handle button press thread
     pthread_t button_thread;
     if (pthread_create(&button_thread, NULL, handle_button_press, NULL) != 0)
     {
@@ -140,12 +143,13 @@ int main(int argc, char **argv)
     pthread_t go_through_sequence_thread;
     if (pthread_create(&go_through_sequence_thread, NULL, go_through_sequence, NULL) != 0)
     {
-        perror("pthread_create() for button press");
+        perror("pthread_create() for sequence thread");
         exit(EXIT_FAILURE);
     }
 
-    while (1)
-        ;
+    pthread_join(button_thread, NULL);
+    pthread_join(go_through_sequence_thread, NULL);
+
     return 0;
 }
 
@@ -164,13 +168,18 @@ void *handle_button_press(void *arg)
 
             if (strcmp(shared_mem->status, "Open") == 0)
             {
-                // Wait another delay ms
-                // Switch to closing.
+                // Handle another delay
             }
 
             if (strcmp(shared_mem->status, "Closing") == 0 || strcmp(shared_mem->status, "Closed") == 0)
             {
                 strcpy(shared_mem->status, "Opening");
+
+                pthread_mutex_unlock(&shared_mem->mutex);
+                pthread_mutex_lock(&status_change_mutex);
+                pthread_cond_signal(&status_change_cond);
+                pthread_mutex_unlock(&status_change_mutex);
+                continue;
             }
         }
         else if (shared_mem->close_button == 1)
@@ -180,6 +189,12 @@ void *handle_button_press(void *arg)
             if (strcmp(shared_mem->status, "Open") == 0)
             {
                 strcpy(shared_mem->status, "Closing");
+
+                pthread_mutex_unlock(&shared_mem->mutex);
+                pthread_mutex_lock(&status_change_mutex);
+                pthread_cond_signal(&status_change_cond);
+                pthread_mutex_unlock(&status_change_mutex);
+                continue;
             }
         }
 
@@ -194,14 +209,15 @@ void *go_through_sequence(void *arg)
 
     while (1)
     {
+        pthread_mutex_lock(&status_change_mutex);
+        pthread_cond_wait(&status_change_cond, &status_change_mutex);
+
         pthread_mutex_lock(&shared_mem->mutex);
 
         if (strcmp(shared_mem->status, "Opening") == 0)
         {
             pthread_mutex_unlock(&shared_mem->mutex);
-
             delay();
-
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Open");
         }
@@ -209,9 +225,7 @@ void *go_through_sequence(void *arg)
         if (strcmp(shared_mem->status, "Open") == 0)
         {
             pthread_mutex_unlock(&shared_mem->mutex);
-
             delay();
-
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Closing");
         }
@@ -219,14 +233,13 @@ void *go_through_sequence(void *arg)
         if (strcmp(shared_mem->status, "Closing") == 0)
         {
             pthread_mutex_unlock(&shared_mem->mutex);
-
             delay();
-
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Closed");
         }
 
         pthread_mutex_unlock(&shared_mem->mutex);
+        pthread_mutex_unlock(&status_change_mutex);
     }
 
     pthread_exit(NULL);
@@ -235,7 +248,7 @@ void *go_through_sequence(void *arg)
 void delay()
 {
     const int time_in_ms = car_info.delay;
-    struct timespec ts, start_time, end_time;
+    struct timespec ts, start_time;
     int rt = 0;
 
     // Get the start time
@@ -259,16 +272,6 @@ void delay()
         rt = pthread_cond_timedwait(&shared_mem->cond, &shared_mem->mutex, &ts);
     } while (rt == 0);
     pthread_mutex_unlock(&shared_mem->mutex);
-
-    // Get the end time
-    clock_gettime(CLOCK_REALTIME, &end_time);
-
-    // Calculate the actual delay duration in milliseconds
-    // long actual_delay_ms = (end_time.tv_sec - start_time.tv_sec) * 1000 +
-    //(end_time.tv_nsec - start_time.tv_nsec) / 1000000;
-
-    // Print the debugging information
-    // printf(">>> Requested delay: %d ms, Actual delay: %ld ms\n", time_in_ms, actual_delay_ms);
 }
 
 void terminate_shared_memory(int sig_num)
