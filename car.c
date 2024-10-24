@@ -47,16 +47,15 @@ typedef struct
     int delay;
 } car_information;
 
-pthread_cond_t status_change_cond = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t status_change_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 // Global variables:
 car_shared_mem *shared_mem;
 car_information car_info;
 char car_name[100] = "/car";
 int shm_fd = -1;
-int early_exit_delay;
+int early_exit_delay = 0;
 pthread_mutex_t early_exit_delay_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t delay_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t delay_cond = PTHREAD_COND_INITIALIZER;
 
 // Function definitions:
 void terminate_shared_memory(int sig_num);
@@ -155,52 +154,29 @@ int main(int argc, char **argv)
     return 0;
 }
 
-void *handle_button_press(void *arg)
-{
-    (void)arg;
-
-    while (1)
-    {
+void *handle_button_press(void *arg) {
+    while (1) {
         pthread_mutex_lock(&shared_mem->mutex);
         pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
 
-        if (shared_mem->open_button == 1)
-        {
+        if (shared_mem->open_button) {
             shared_mem->open_button = 0;
 
-            if (strcmp(shared_mem->status, "Open") == 0)
-            {
-                // Handle another delay
-            }
-
-            if (strcmp(shared_mem->status, "Closing") == 0 || strcmp(shared_mem->status, "Closed") == 0)
-            {
+            if (strcmp(shared_mem->status, "Closing") == 0 || strcmp(shared_mem->status, "Closed") == 0) {
                 strcpy(shared_mem->status, "Opening");
-
-                pthread_mutex_unlock(&shared_mem->mutex);
-                pthread_mutex_lock(&status_change_mutex);
-                pthread_cond_signal(&status_change_cond);
-                pthread_mutex_unlock(&status_change_mutex);
-                continue;
+                pthread_cond_broadcast(&shared_mem->cond);
             }
-        }
-        else if (shared_mem->close_button == 1)
-        {
+        } else if (shared_mem->close_button) {
             shared_mem->close_button = 0;
 
-            if (strcmp(shared_mem->status, "Open") == 0)
-            {
+            if (strcmp(shared_mem->status, "Open") == 0) {
                 strcpy(shared_mem->status, "Closing");
+                pthread_cond_broadcast(&shared_mem->cond);
 
-                pthread_mutex_lock(&early_exit_delay_mutex);
+                pthread_mutex_lock(&delay_mutex);
                 early_exit_delay = 1;
-                pthread_mutex_unlock(&early_exit_delay_mutex);
-
-                pthread_mutex_unlock(&shared_mem->mutex);
-                pthread_mutex_lock(&status_change_mutex);
-                pthread_cond_signal(&status_change_cond);
-                pthread_mutex_unlock(&status_change_mutex);
-                continue;
+                pthread_cond_signal(&delay_cond);
+                pthread_mutex_unlock(&delay_mutex);
             }
         }
 
@@ -216,10 +192,8 @@ void *go_through_sequence(void *arg)
 
     while (1)
     {
-        pthread_mutex_lock(&status_change_mutex);
-        pthread_cond_wait(&status_change_cond, &status_change_mutex);
-
         pthread_mutex_lock(&shared_mem->mutex);
+        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
 
         if (strcmp(shared_mem->status, "Opening") == 0)
         {
@@ -227,6 +201,7 @@ void *go_through_sequence(void *arg)
             delay();
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Open");
+            pthread_cond_broadcast(&shared_mem->cond);
         }
 
         if (strcmp(shared_mem->status, "Open") == 0)
@@ -235,6 +210,7 @@ void *go_through_sequence(void *arg)
             delay();
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Closing");
+            pthread_cond_broadcast(&shared_mem->cond);
         }
 
         if (strcmp(shared_mem->status, "Closing") == 0)
@@ -243,10 +219,10 @@ void *go_through_sequence(void *arg)
             delay();
             pthread_mutex_lock(&shared_mem->mutex);
             strcpy(shared_mem->status, "Closed");
+            pthread_cond_broadcast(&shared_mem->cond);
         }
 
         pthread_mutex_unlock(&shared_mem->mutex);
-        pthread_mutex_unlock(&status_change_mutex);
     }
 
     pthread_exit(NULL);
@@ -254,17 +230,12 @@ void *go_through_sequence(void *arg)
 
 void delay()
 {
-    const int time_in_ms = car_info.delay;
-    struct timespec ts, start_time, end_time;
+    struct timespec ts;
     int rt = 0;
 
-    // Get the start time
-    clock_gettime(CLOCK_REALTIME, &start_time);
-
-    // Set the target time for delay
     clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += time_in_ms / 1000;
-    ts.tv_nsec += (time_in_ms % 1000) * 1000000;
+    ts.tv_sec += car_info.delay / 1000;
+    ts.tv_nsec += (car_info.delay % 1000) * 1000000;
 
     // Adjust for nanosecond overflow
     if (ts.tv_nsec >= 1000000000)
@@ -273,36 +244,28 @@ void delay()
         ts.tv_nsec -= 1000000000;
     }
 
-    pthread_mutex_lock(&shared_mem->mutex);
-    do
+    pthread_mutex_lock(&delay_mutex);
+    while (1)
     {
-        rt = pthread_cond_timedwait(&shared_mem->cond, &shared_mem->mutex, &ts);
-
+        rt = pthread_cond_timedwait(&delay_cond, &delay_mutex, &ts);
         pthread_mutex_lock(&early_exit_delay_mutex);
         if (early_exit_delay)
         {
-            early_exit_delay = 0;
+            early_exit_delay = 1;
             pthread_mutex_unlock(&early_exit_delay_mutex);
+            pthread_mutex_unlock(&delay_mutex);
+            return; // Exit early
+        }
+        pthread_mutex_unlock(&early_exit_delay_mutex);
+
+        // If the timeout occurred, break the loop
+        if (rt == ETIMEDOUT)
+        {
             break;
         }
-        pthread_mutex_unlock(&early_exit_delay_mutex); 
-
-    } while (rt == 0);
-    pthread_mutex_unlock(&shared_mem->mutex);
-
-    // Get the end time
-    clock_gettime(CLOCK_REALTIME, &end_time);
-
-    // Calculate the elapsed time
-    long seconds = end_time.tv_sec - start_time.tv_sec;
-    long nanoseconds = end_time.tv_nsec - start_time.tv_nsec;
-    if (nanoseconds < 0)
-    {
-        seconds -= 1;
-        nanoseconds += 1000000000;
     }
+    pthread_mutex_unlock(&delay_mutex);
 }
-
 
 void *send_status_messages(void *arg)
 {

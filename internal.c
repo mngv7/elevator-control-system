@@ -65,7 +65,7 @@ void update_shared_mem(uint8_t *ptr_to_update, int new_val)
 {
     pthread_mutex_lock(&shared_mem->mutex);
     *ptr_to_update = new_val;
-    pthread_cond_signal(&shared_mem->cond);
+    pthread_cond_broadcast(&shared_mem->cond);
     pthread_mutex_unlock(&shared_mem->mutex);
 }
 
@@ -120,7 +120,7 @@ void handle_floor_change(int direction)
         }
     }
 
-    pthread_cond_signal(&shared_mem->cond);
+    pthread_cond_broadcast(&shared_mem->cond);
     pthread_mutex_unlock(&shared_mem->mutex);
     exit(0);
 }
