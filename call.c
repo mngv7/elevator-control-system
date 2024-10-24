@@ -10,9 +10,12 @@
 #include <unistd.h>
 #include <errno.h>
 #include <ctype.h>
+#include <signal.h>
 #include "network_utils.h"
 
 #define BUFFER_SIZE 1024
+
+int socket_fd = -1; // Global to allow cleanup in the signal handler
 
 // Functions from network_utils.h
 int establish_connection();
@@ -22,9 +25,14 @@ void send_message(int fd, const char *buf);
 void send_looped(int fd, const void *buf, size_t sz);
 
 int is_valid_floor(const char *floor);
+void handle_signal(int signal);
 
 int main(int argc, char **argv)
 {
+    // Register signal handler for SIGINT (Ctrl+C) and SIGTERM
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+
     // Check the number of command line arguments.
     if (argc != 3)
     {
@@ -45,16 +53,21 @@ int main(int argc, char **argv)
     }
 
     // Establish connection and send the first message.
-    int sockfd = establish_connection();
+    socket_fd = establish_connection();
+    if (socket_fd == -1)
+    {
+        fprintf(stderr, "Error: Failed to establish connection to the server.\n");
+        return EXIT_FAILURE;
+    }
 
-    char sendbuf[BUFFER_SIZE];
+    char send_controller_buffer[BUFFER_SIZE];
 
     // Format and send message to the controller: CALL {source floor} {destination floor}
-    snprintf(sendbuf, sizeof(sendbuf), "CALL %s %s", argv[1], argv[2]);
-    send_message(sockfd, sendbuf);
+    snprintf(send_controller_buffer, sizeof(send_controller_buffer), "CALL %s %s", argv[1], argv[2]);
+    send_message(socket_fd, send_controller_buffer);
 
     // Blocking function to wait for the controller's response.
-    char *msg_from_controller = receive_msg(sockfd);
+    char *msg_from_controller = receive_msg(socket_fd);
     fflush(stdout);
 
     // Handle the controller's response and print appropriate message.
@@ -74,14 +87,29 @@ int main(int argc, char **argv)
 
     free(msg_from_controller);
 
-    // Close the first connection.
-    if (close(sockfd) == -1)
+    // Close the connection.
+    if (close(socket_fd) == -1)
     {
         perror("close()");
         return EXIT_FAILURE;
     }
 
+    socket_fd = -1; // Reset after closing
+
     return EXIT_SUCCESS;
+}
+
+// Signal handler function to close the socket and exit gracefully
+void handle_signal(int signal)
+{
+    if (socket_fd != -1)
+    {
+        printf("\nReceived signal %d, closing the connection...\n", signal);
+        close(socket_fd); // Close the socket
+        socket_fd = -1;   // Reset the socket descriptor to avoid double closing
+    }
+
+    exit(EXIT_FAILURE); // Exit after cleanup
 }
 
 // Function: checks if the argument (floor) is valid.
