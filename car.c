@@ -67,6 +67,7 @@ void *indiviudal_service_mode(void *arg);
 void *connnect_to_controller(void *arg);
 char get_call_direction(const char *source, const char *destination);
 void *send_status_messages(void *arg);
+void *normal_operation(void *arg);
 void delay();
 
 int main(int argc, char **argv)
@@ -161,24 +162,33 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    pthread_t controller_connection_thread;
+    /*pthread_t controller_connection_thread;
     if (pthread_create(&controller_connection_thread, NULL, connnect_to_controller, NULL) != 0)
     {
         perror("pthread_create() for connect to controller thread.");
         exit(EXIT_FAILURE);
-    }
+    }*/
 
-    pthread_t send_status_messages_thread;
-    if (pthread_create(&send_status_messages_thread, NULL, send_status_messages, NULL) != 0)
+    // pthread_t send_status_messages_thread;
+    /*if (pthread_create(&send_status_messages_thread, NULL, send_status_messages, NULL) != 0)
     {
         perror("pthread_create() for send status message thread.");
         exit(EXIT_FAILURE);
-    }
+    }*/
+
+    // pthread_t normal_operation_thread;
+    /*if (pthread_create(&normal_operation_thread, NULL, normal_operation, NULL) != 0)
+    {
+        perror("pthread_create() for normal operation thread.");
+        exit(EXIT_FAILURE);
+    }*/
 
     pthread_join(button_thread, NULL);
-    pthread_join(controller_connection_thread, NULL);
     pthread_join(indiviudal_service_mode_thread, NULL);
     pthread_join(go_through_sequence_thread, NULL);
+    //pthread_join(controller_connection_thread, NULL);
+    // pthread_join(send_status_messages_thread, NULL);
+    // pthread_join(normal_operation_thread, NULL);
 
     return 0;
 }
