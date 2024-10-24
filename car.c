@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include "network_utils.h"
+#include "common.h"
 #include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
@@ -61,6 +62,8 @@ pthread_cond_t delay_cond = PTHREAD_COND_INITIALIZER;
 void terminate_shared_memory(int sig_num);
 void *go_through_sequence(void *arg);
 void *handle_button_press(void *arg);
+void *indiviudal_service_mode(void *arg);
+char get_call_direction(const char *source, const char *destination);
 void delay();
 
 int main(int argc, char **argv)
@@ -148,28 +151,86 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    pthread_t indiviudal_service_mode_thread;
+    if (pthread_create(&indiviudal_service_mode_thread, NULL, indiviudal_service_mode, NULL) != 0)
+    {
+        perror("pthread_create() for individual service mode thread.");
+        exit(EXIT_FAILURE);
+    }
+
     pthread_join(button_thread, NULL);
+    pthread_join(indiviudal_service_mode_thread, NULL);
     pthread_join(go_through_sequence_thread, NULL);
 
     return 0;
 }
 
-void *handle_button_press(void *arg) {
-    while (1) {
+void *indiviudal_service_mode(void *arg)
+{
+    while (1)
+    {
+        pthread_mutex_lock(&shared_mem->mutex);
+        if (shared_mem->individual_service_mode == 1)
+        {
+            pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+
+            if (get_call_direction(car_info.highest_floor, shared_mem->destination_floor) == 'U')
+            {
+                strcpy(shared_mem->destination_floor, shared_mem->current_floor);
+            }
+            else if (strcmp(shared_mem->current_floor, shared_mem->destination_floor) != 0 &&
+                strcmp(shared_mem->status, "Closed") == 0)
+            {
+                strcpy(shared_mem->status, "Between");
+                pthread_cond_broadcast(&shared_mem->cond);
+
+                pthread_mutex_unlock(&shared_mem->mutex);
+                delay();
+                pthread_mutex_lock(&shared_mem->mutex);
+
+                strcpy(shared_mem->current_floor, shared_mem->destination_floor);
+                strcpy(shared_mem->status, "Closed");
+
+                pthread_cond_broadcast(&shared_mem->cond);
+            }
+        }
+        pthread_mutex_unlock(&shared_mem->mutex);
+    }
+
+    pthread_exit(NULL);
+}
+
+void *handle_button_press(void *arg)
+{
+    while (1)
+    {
         pthread_mutex_lock(&shared_mem->mutex);
         pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
 
-        if (shared_mem->open_button) {
+        if (shared_mem->open_button)
+        {
             shared_mem->open_button = 0;
-
-            if (strcmp(shared_mem->status, "Closing") == 0 || strcmp(shared_mem->status, "Closed") == 0) {
+            if (shared_mem->individual_service_mode == 1)
+            {
+                strcpy(shared_mem->status, "Open");
+                pthread_cond_broadcast(&shared_mem->cond);
+            }
+            else if (strcmp(shared_mem->status, "Closing") == 0 || strcmp(shared_mem->status, "Closed") == 0)
+            {
                 strcpy(shared_mem->status, "Opening");
                 pthread_cond_broadcast(&shared_mem->cond);
             }
-        } else if (shared_mem->close_button) {
+        }
+        else if (shared_mem->close_button)
+        {
             shared_mem->close_button = 0;
-
-            if (strcmp(shared_mem->status, "Open") == 0) {
+            if (shared_mem->individual_service_mode == 1)
+            {
+                strcpy(shared_mem->status, "Closed");
+                pthread_cond_broadcast(&shared_mem->cond);
+            }
+            else if (strcmp(shared_mem->status, "Open") == 0)
+            {
                 strcpy(shared_mem->status, "Closing");
                 pthread_cond_broadcast(&shared_mem->cond);
 
@@ -185,7 +246,6 @@ void *handle_button_press(void *arg) {
     pthread_exit(NULL);
 }
 
-
 void *go_through_sequence(void *arg)
 {
     (void)arg;
@@ -194,32 +254,34 @@ void *go_through_sequence(void *arg)
     {
         pthread_mutex_lock(&shared_mem->mutex);
         pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
-
-        if (strcmp(shared_mem->status, "Opening") == 0)
+        if (shared_mem->individual_service_mode == 0)
         {
-            pthread_mutex_unlock(&shared_mem->mutex);
-            delay();
-            pthread_mutex_lock(&shared_mem->mutex);
-            strcpy(shared_mem->status, "Open");
-            pthread_cond_broadcast(&shared_mem->cond);
-        }
+            if (strcmp(shared_mem->status, "Opening") == 0)
+            {
+                pthread_mutex_unlock(&shared_mem->mutex);
+                delay();
+                pthread_mutex_lock(&shared_mem->mutex);
+                strcpy(shared_mem->status, "Open");
+                pthread_cond_broadcast(&shared_mem->cond);
+            }
 
-        if (strcmp(shared_mem->status, "Open") == 0)
-        {
-            pthread_mutex_unlock(&shared_mem->mutex);
-            delay();
-            pthread_mutex_lock(&shared_mem->mutex);
-            strcpy(shared_mem->status, "Closing");
-            pthread_cond_broadcast(&shared_mem->cond);
-        }
+            if (strcmp(shared_mem->status, "Open") == 0)
+            {
+                pthread_mutex_unlock(&shared_mem->mutex);
+                delay();
+                pthread_mutex_lock(&shared_mem->mutex);
+                strcpy(shared_mem->status, "Closing");
+                pthread_cond_broadcast(&shared_mem->cond);
+            }
 
-        if (strcmp(shared_mem->status, "Closing") == 0)
-        {
-            pthread_mutex_unlock(&shared_mem->mutex);
-            delay();
-            pthread_mutex_lock(&shared_mem->mutex);
-            strcpy(shared_mem->status, "Closed");
-            pthread_cond_broadcast(&shared_mem->cond);
+            if (strcmp(shared_mem->status, "Closing") == 0)
+            {
+                pthread_mutex_unlock(&shared_mem->mutex);
+                delay();
+                pthread_mutex_lock(&shared_mem->mutex);
+                strcpy(shared_mem->status, "Closed");
+                pthread_cond_broadcast(&shared_mem->cond);
+            }
         }
 
         pthread_mutex_unlock(&shared_mem->mutex);
@@ -287,20 +349,6 @@ void *normal_operation(void *arg)
     // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
 
     // If the current floor and destination floor are equal, call "reached_destination_floor" function.
-    pthread_exit(NULL);
-}
-
-void *indiviudal_service_mode(void *arg)
-{
-    if (shared_mem->individual_service_mode == 1)
-    {
-        // If a change in destination floor is detected:
-        //  - Only if the car is closed:
-        //      - Set the status to "Between".
-        //      - Wait delay (ms)
-        //      - Set the current floor to the destination floor
-        //      - Set the status to "Closed".
-    }
     pthread_exit(NULL);
 }
 
