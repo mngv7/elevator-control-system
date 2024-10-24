@@ -61,3 +61,43 @@ char *receive_msg(int fd)
     recv_looped(fd, buf, len);
     return buf;
 }
+
+int establish_connection()
+{
+    // Create a new socket for each request.
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1)
+    {
+        perror("socket()");
+        exit(EXIT_FAILURE);
+    }
+
+    int opt_enable = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt_enable, sizeof(opt_enable)) == -1)
+    {
+        perror("setsockopt()");
+        exit(EXIT_FAILURE);
+    }
+
+    // Setup socket address for server connection.
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(3000);
+    const char *ipaddress = "127.0.0.1";
+
+    if (inet_pton(AF_INET, ipaddress, &addr.sin_addr) != 1)
+    {
+        fprintf(stderr, "inet_pton(%s)\n", ipaddress);
+        exit(EXIT_FAILURE);
+    }
+
+    // Establish the connection.
+    if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
+    {
+        printf("Unable to connect to elevator system.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    return sockfd;
+}
