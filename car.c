@@ -57,13 +57,16 @@ int early_exit_delay = 0;
 pthread_mutex_t early_exit_delay_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t delay_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t delay_cond = PTHREAD_COND_INITIALIZER;
+int controller_sock_fd;
 
 // Function definitions:
 void terminate_shared_memory(int sig_num);
 void *go_through_sequence(void *arg);
 void *handle_button_press(void *arg);
 void *indiviudal_service_mode(void *arg);
+void *connnect_to_controller(void *arg);
 char get_call_direction(const char *source, const char *destination);
+void *send_status_messages(void *arg);
 void delay();
 
 int main(int argc, char **argv)
@@ -158,11 +161,146 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    pthread_t controller_connection_thread;
+    if (pthread_create(&controller_connection_thread, NULL, connnect_to_controller, NULL) != 0)
+    {
+        perror("pthread_create() for connect to controller thread.");
+        exit(EXIT_FAILURE);
+    }
+
+    pthread_t send_status_messages_thread;
+    if (pthread_create(&send_status_messages_thread, NULL, send_status_messages, NULL) != 0)
+    {
+        perror("pthread_create() for send status message thread.");
+        exit(EXIT_FAILURE);
+    }
+
     pthread_join(button_thread, NULL);
+    pthread_join(controller_connection_thread, NULL);
     pthread_join(indiviudal_service_mode_thread, NULL);
     pthread_join(go_through_sequence_thread, NULL);
 
     return 0;
+}
+
+void *connnect_to_controller(void *arg)
+{
+    controller_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (controller_sock_fd == -1)
+    {
+        perror("socket()");
+        exit(1);
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(3000);
+    const char *ipaddress = "127.0.0.1";
+
+    if (inet_pton(AF_INET, ipaddress, &addr.sin_addr) != 1)
+    {
+        fprintf(stderr, "inet_pton(%s)\n", ipaddress);
+        exit(1);
+    }
+
+    connect(controller_sock_fd, (const struct sockaddr *)&addr, sizeof(addr));
+
+    char car_initialisation_message[256];
+
+    sprintf(car_initialisation_message, "CAR %s %s %s", car_info.name, car_info.lowest_floor, car_info.highest_floor);
+    send_message(controller_sock_fd, car_initialisation_message);
+
+    char status_message[256];
+
+    pthread_mutex_lock(&shared_mem->mutex);
+    sprintf(status_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
+    pthread_mutex_unlock(&shared_mem->mutex);
+
+    send_message(controller_sock_fd, status_message);
+
+    while (1)
+    {
+        char *message_from_controller = receive_msg(controller_sock_fd);
+
+        if (strncmp(message_from_controller, "FLOOR", 5) == 0)
+        {
+            char dispatch_floor[4];
+            sscanf(message_from_controller, "FLOOR %s", dispatch_floor); // New floor call.
+
+            pthread_mutex_lock(&shared_mem->mutex);
+            if (strcmp(shared_mem->current_floor, dispatch_floor) == 0) // If the car is already on that floor.
+            {
+                strcpy(shared_mem->status, "Opening");
+                pthread_cond_broadcast(&shared_mem->cond);
+            }
+            else // Set the new destination floor.
+            {
+                if (strcmp(shared_mem->status, "Between") != 0) // If a new destination arrives while the car is in the Between status, that destination will not replace the car's current destination until the car reaches the next floor.
+                {
+                    strcpy(shared_mem->destination_floor, dispatch_floor);
+                    pthread_cond_broadcast(&shared_mem->cond);
+                }
+            }
+            pthread_mutex_unlock(&shared_mem->mutex);
+        }
+        else
+        {
+            break;
+        }
+
+        free(message_from_controller);
+    }
+
+    pthread_exit(NULL);
+}
+
+void *send_status_messages(void *arg)
+{
+    // Send messages in the form:
+    // STATUS {status} {current floor} {destination floor}
+
+    char status_message[256];
+    while (1)
+    {
+        pthread_mutex_lock(&shared_mem->mutex);
+        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+
+        sprintf(status_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
+
+        pthread_mutex_unlock(&shared_mem->mutex);
+        send_message(controller_sock_fd, status_message);
+    }
+
+    // This message should be sent when:
+    // - Everytime the shared memory changes (check condition variable)
+    // - If delay (ms) has passed since the last message.
+    pthread_exit(NULL);
+}
+
+void *normal_operation(void *arg)
+{
+    while (1)
+    {
+        pthread_mutex_lock(&shared_mem->mutex);
+        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+        if (strcmp(shared_mem->destination_floor, shared_mem->current_floor) != 0)
+        {
+            if (strcmp(shared_mem->status, "Closed") == 0)
+            {
+                strcpy(shared_mem->status, "Between");
+                pthread_cond_broadcast(&shared_mem->cond);
+
+                delay();
+
+                // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+            }
+        }
+        pthread_mutex_unlock(&shared_mem->mutex);
+    }
+
+    // If the current floor and destination floor are equal, call "reached_destination_floor" function.
+    pthread_exit(NULL);
 }
 
 void *indiviudal_service_mode(void *arg)
@@ -179,7 +317,7 @@ void *indiviudal_service_mode(void *arg)
                 strcpy(shared_mem->destination_floor, shared_mem->current_floor);
             }
             else if (strcmp(shared_mem->current_floor, shared_mem->destination_floor) != 0 &&
-                strcmp(shared_mem->status, "Closed") == 0)
+                     strcmp(shared_mem->status, "Closed") == 0)
             {
                 strcpy(shared_mem->status, "Between");
                 pthread_cond_broadcast(&shared_mem->cond);
@@ -327,106 +465,6 @@ void delay()
         }
     }
     pthread_mutex_unlock(&delay_mutex);
-}
-
-void *send_status_messages(void *arg)
-{
-    // Send messages in the form:
-    // STATUS {status} {current floor} {destination floor}
-
-    // This message should be sent when:
-    // - Immediately after the car initialisation message (complete).
-    // - Everytime the shared memory changes (check condition variable)
-    // - If delay (ms) has passed since the last message.
-    pthread_exit(NULL);
-}
-
-void *normal_operation(void *arg)
-{
-    // If the destination floor is different from the current floor and the doors are closed, the car will:
-    // - Change its status to Between
-    // - Wait (delay) ms
-    // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
-
-    // If the current floor and destination floor are equal, call "reached_destination_floor" function.
-    pthread_exit(NULL);
-}
-
-void *connnect_to_controller(void *arg)
-{
-    car_information *car_info = (car_information *)arg;
-
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1)
-    {
-        perror("socket()");
-        exit(1);
-    }
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(3000);
-    const char *ipaddress = "127.0.0.1";
-
-    if (inet_pton(AF_INET, ipaddress, &addr.sin_addr) != 1)
-    {
-        fprintf(stderr, "inet_pton(%s)\n", ipaddress);
-        exit(1);
-    }
-    while (1)
-    {
-        usleep(car_info->delay * 1000);
-        if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == 0)
-        {
-            break;
-        }
-    }
-    char car_initialisation_message[256];
-
-    sprintf(car_initialisation_message, "CAR %s %s %s", car_info->name, car_info->lowest_floor, car_info->highest_floor);
-    send_message(sockfd, car_initialisation_message);
-
-    char status_initialisation_message[256];
-
-    pthread_mutex_lock(&shared_mem->mutex);
-    sprintf(status_initialisation_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
-    pthread_mutex_unlock(&shared_mem->mutex);
-
-    send_message(sockfd, status_initialisation_message);
-
-    while (1)
-    {
-        char *message_from_controller = receive_msg(sockfd);
-
-        if (strncmp(message_from_controller, "FLOOR", 5) == 0)
-        {
-            char dispatch_floor[4];
-            sscanf(message_from_controller, "FLOOR %s", dispatch_floor); // New floor call.
-
-            pthread_mutex_lock(&shared_mem->mutex);
-            if (strcmp(shared_mem->current_floor, dispatch_floor) == 0) // If the car is already on that floor.
-            {
-                // reached_destination_floor(shared_mem, car_info->delay); // Open and close the doors.
-            }
-            else // Set the new destination floor.
-            {
-                if (strcmp(shared_mem->status, "Between") != 0) // If a new destination arrives while the car is in the Between status, that destination will not replace the car's current destination until the car reaches the next floor.
-                {
-                    strcpy(shared_mem->destination_floor, dispatch_floor);
-                }
-            }
-            pthread_mutex_unlock(&shared_mem->mutex);
-        }
-        else
-        {
-            break;
-        }
-
-        free(message_from_controller);
-    }
-
-    pthread_exit(NULL);
 }
 
 void terminate_shared_memory(int sig_num)
