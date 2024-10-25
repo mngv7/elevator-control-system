@@ -36,6 +36,7 @@ call: $(CALL_OBJ) $(NETWORK_UTILS_OBJ) $(COMMON_OBJ)  # Link against network_uti
 internal: $(INTERNAL_OBJ) $(NETWORK_UTILS_OBJ) $(COMMON_OBJ)  # Link against network_utils.o and common.o if needed
 	$(CC) $(CFLAGS) -o internal $(INTERNAL_OBJ) $(NETWORK_UTILS_OBJ) $(COMMON_OBJ)
 
+
 # Rule to build safety executable
 safety: $(SAFETY_OBJ)
 	$(CC) $(CFLAGS) -o safety $(SAFETY_OBJ)

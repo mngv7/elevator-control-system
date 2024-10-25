@@ -13,25 +13,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <signal.h>
-
-char *status_names[] = {
-    "Opening", "Open", "Closing", "Closed", "Between"};
-
-typedef struct
-{
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    char current_floor[4];
-    char destination_floor[4];
-    char status[8];
-    uint8_t open_button;
-    uint8_t close_button;
-    uint8_t door_obstruction;
-    uint8_t overload;
-    uint8_t emergency_stop;
-    uint8_t individual_service_mode;
-    uint8_t emergency_mode;
-} car_shared_mem;
+#include "common.h"
 
 car_shared_mem *shared_mem;
 
@@ -87,7 +69,7 @@ int main(int argc, char **argv)
         pthread_mutex_lock(&shared_mem->mutex);
         shared_mem->emergency_mode = 0;
         pthread_mutex_unlock(&shared_mem->mutex);
-        
+
         update_shared_mem(&shared_mem->individual_service_mode, 1);
     }
     else if (!strcmp(argv[2], "service_off"))
@@ -132,11 +114,11 @@ int is_floor_change_allowed(void)
     {
         printf("Operation only allowed in service mode.\n");
     }
-    else if (strcmp(shared_mem->status, status_names[4]) == 0)
+    else if (strcmp(shared_mem->status, "Between") == 0)
     {
         printf("Operation not allowed while elevator is moving.\n");
     }
-    else if (strcmp(shared_mem->status, status_names[3]) != 0)
+    else if (strcmp(shared_mem->status, "Closed") != 0)
     {
         printf("Operation not allowed while doors are open.\n");
     }
