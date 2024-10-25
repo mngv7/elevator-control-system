@@ -144,7 +144,6 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-<<<<<<< HEAD
     pthread_t connect_to_controller_thread;
     if (pthread_create(&connect_to_controller_thread, NULL, connect_to_controller, NULL) != 0)
     {
@@ -152,15 +151,6 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
     pthread_join(connect_to_controller_thread, NULL);
-=======
-    pthread_t controller_connection_thread;
-    if (pthread_create(&controller_connection_thread, NULL, connect_to_controller, NULL) != 0)
-    {
-        perror("pthread_create() for controller connection.");
-        exit(EXIT_FAILURE);
-    }
-    pthread_join(controller_connection_thread, NULL);
->>>>>>> 48da8d9 (Experimenting with controller connection.)
 
     pthread_join(button_thread, NULL);
     pthread_join(individual_service_mode_thread, NULL);
@@ -401,11 +391,7 @@ void *connect_to_controller(void *arg)
     if (controller_sock_fd == -1)
     {
         perror("socket()");
-<<<<<<< HEAD
         pthread_exit(NULL);
-=======
-        pthread_exit(NULL); // Exit thread on socket creation failure
->>>>>>> 48da8d9 (Experimenting with controller connection.)
     }
 
     int opt = 1;
@@ -427,7 +413,6 @@ void *connect_to_controller(void *arg)
     {
         fprintf(stderr, "inet_pton(%s)\n", ipaddress);
         close(controller_sock_fd);
-<<<<<<< HEAD
         pthread_exit(NULL);
     }
 
@@ -435,18 +420,6 @@ void *connect_to_controller(void *arg)
     {
         close(controller_sock_fd);
         pthread_exit(NULL);
-=======
-        controller_sock_fd = -1;
-        pthread_exit(NULL); // Exit thread on IP conversion failure
-    }
-
-    // Attempt to connect to the controller
-    if (connect(controller_sock_fd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
-    {
-        close(controller_sock_fd);
-        controller_sock_fd = -1;
-        pthread_exit(NULL); // Exit if connection fails
->>>>>>> 48da8d9 (Experimenting with controller connection.)
     }
 
     // Connection successful; send initialization and status messages
@@ -461,7 +434,6 @@ void *connect_to_controller(void *arg)
     pthread_mutex_unlock(&shared_mem->mutex);
     send_message(controller_sock_fd, status_message);
 
-<<<<<<< HEAD
     while (1)
     {
         char *message_from_controller = receive_msg(controller_sock_fd);
@@ -495,12 +467,6 @@ void *connect_to_controller(void *arg)
 
         free(message_from_controller);
     }
-=======
-    // Shut down and close the socket once done
-    shutdown(controller_sock_fd, SHUT_RDWR); // Disable both reading and writing
-    close(controller_sock_fd);
-    controller_sock_fd = -1;
->>>>>>> 48da8d9 (Experimenting with controller connection.)
 
     shutdown(controller_sock_fd, SHUT_RDWR); // Disable both reading and writing
     close(controller_sock_fd);
