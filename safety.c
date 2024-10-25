@@ -7,12 +7,13 @@
 #include <fcntl.h>
 #include <ctype.h>
 #include "common.h"
+#include <stdio.h> // DEVIATION
 
-// Not allowed, will have to remove later.
-#include <stdio.h>
+// Page 96
 
-// TODO:
-// Write a custom function for snprintf.
+// ctrl+ F these things:
+// DEVIATION
+// VIOLATE
 
 // Constants for clarity and magic number avoidance
 const uint32_t STATUS_LENGTH = 8U;
@@ -25,7 +26,7 @@ const uint8_t EXIT_FAILURE = 1U;
 const uint8_t EXIT_SUCCESS = 0U;
 
 // Function prototypes
-void custom_print(const char *str);
+void custom_print(const char *string_to_print);
 int check_data_consistency(const car_shared_mem *shared_mem);
 int is_valid_floor(const char *floor);
 
@@ -42,7 +43,7 @@ int main(int argc, char **argv)
         char car_name[MAX_CAR_NAME_LENGTH];
 
         // Construct the shared memory name safely
-        if (snprintf(car_name, sizeof(car_name), "/car%s", argv[1]) < 0)
+        if (snprintf(car_name, sizeof(car_name), "/car%s", argv[1]) < 0) // DEVIATION
         {
             custom_print("Failed to create car name.\n");
             return EXIT_FAILURE;
@@ -169,11 +170,24 @@ int is_valid_floor(const char *floor)
 int check_data_consistency(const car_shared_mem *shared_mem)
 {
     const char *status_names[] = {
-        "Opening", "Open", "Closing", "Closed", "Between"};
+        "Opening", "Open", "Closing", "Closed", "Between"
+    };
 
     if (shared_mem->emergency_mode != EMERGENCY_MODE_ON)
     {
-        if (!is_valid_floor(shared_mem->current_floor) || !is_valid_floor(shared_mem->destination_floor))
+        // Create temporary buffers to ensure null-termination
+        char current_floor_buffer[sizeof(shared_mem->current_floor)]; // Size: 4
+        char destination_floor_buffer[sizeof(shared_mem->destination_floor)]; // Size: 4
+
+        // Safely copy the current and destination floors to ensure null-termination
+        strncpy(current_floor_buffer, shared_mem->current_floor, sizeof(current_floor_buffer) - 1); // VIOLATE 21.18
+        current_floor_buffer[sizeof(current_floor_buffer) - 1] = '\0'; // Null-terminate
+
+        strncpy(destination_floor_buffer, shared_mem->destination_floor, sizeof(destination_floor_buffer) - 1); // VIOLATE 21.18
+        destination_floor_buffer[sizeof(destination_floor_buffer) - 1] = '\0'; // Null-terminate
+
+        // Validate floors
+        if (!is_valid_floor(current_floor_buffer) || !is_valid_floor(destination_floor_buffer))
         {
             return 0; // Invalid floor data
         }
@@ -215,3 +229,4 @@ int check_data_consistency(const car_shared_mem *shared_mem)
 
     return 1; // Data is consistent
 }
+
