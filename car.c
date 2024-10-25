@@ -46,7 +46,7 @@ pthread_cond_t delay_cond = PTHREAD_COND_INITIALIZER;
 void terminate_shared_memory(int sig_num);
 void *go_through_sequence(void *arg);
 void *handle_button_press(void *arg);
-void *indiviudal_service_mode(void *arg);
+void *individual_service_mode(void *arg);
 char get_call_direction(const char *source, const char *destination);
 void delay();
 
@@ -135,21 +135,21 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    pthread_t indiviudal_service_mode_thread;
-    if (pthread_create(&indiviudal_service_mode_thread, NULL, indiviudal_service_mode, NULL) != 0)
+    pthread_t individual_service_mode_thread;
+    if (pthread_create(&individual_service_mode_thread, NULL, individual_service_mode, NULL) != 0)
     {
         perror("pthread_create() for individual service mode thread.");
         exit(EXIT_FAILURE);
     }
 
     pthread_join(button_thread, NULL);
-    pthread_join(indiviudal_service_mode_thread, NULL);
+    pthread_join(individual_service_mode_thread, NULL);
     pthread_join(go_through_sequence_thread, NULL);
 
     return 0;
 }
 
-void *indiviudal_service_mode(void *arg)
+void *individual_service_mode(void *arg)
 {
     while (1)
     {
@@ -163,7 +163,7 @@ void *indiviudal_service_mode(void *arg)
                 strcpy(shared_mem->destination_floor, shared_mem->current_floor);
             }
             else if (strcmp(shared_mem->current_floor, shared_mem->destination_floor) != 0 &&
-                strcmp(shared_mem->status, "Closed") == 0)
+                     strcmp(shared_mem->status, "Closed") == 0)
             {
                 strcpy(shared_mem->status, "Between");
                 pthread_cond_broadcast(&shared_mem->cond);
@@ -313,24 +313,62 @@ void delay()
     pthread_mutex_unlock(&delay_mutex);
 }
 
+// Send messages in the form:
+// STATUS {status} {current floor} {destination floor}
+
+// This message should be sent when:
+// - Immediately after the car initialisation message (complete).
+// - Everytime the shared memory changes (check condition variable)
+// - If delay (ms) has passed since the last message.
 void *send_status_messages(void *arg)
 {
     // Send messages in the form:
     // STATUS {status} {current floor} {destination floor}
 
+    char status_message[256];
+    while (1)
+    {
+        pthread_mutex_lock(&shared_mem->mutex);
+        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+
+        sprintf(status_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
+
+        pthread_mutex_unlock(&shared_mem->mutex);
+        send_message(controller_sock_fd, status_message);
+    }
+
     // This message should be sent when:
-    // - Immediately after the car initialisation message (complete).
     // - Everytime the shared memory changes (check condition variable)
     // - If delay (ms) has passed since the last message.
     pthread_exit(NULL);
 }
 
+// If the destination floor is different from the current floor and the doors are closed, the car will:
+// - Change its status to Between
+// - Wait (delay) ms
+// - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+
+// If the current floor and destination floor are equal, call "reached_destination_floor" function.
 void *normal_operation(void *arg)
 {
-    // If the destination floor is different from the current floor and the doors are closed, the car will:
-    // - Change its status to Between
-    // - Wait (delay) ms
-    // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+    while (1)
+    {
+        pthread_mutex_lock(&shared_mem->mutex);
+        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+        if (strcmp(shared_mem->destination_floor, shared_mem->current_floor) != 0)
+        {
+            if (strcmp(shared_mem->status, "Closed") == 0)
+            {
+                strcpy(shared_mem->status, "Between");
+                pthread_cond_broadcast(&shared_mem->cond);
+
+                delay();
+
+                // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+            }
+        }
+        pthread_mutex_unlock(&shared_mem->mutex);
+    }
 
     // If the current floor and destination floor are equal, call "reached_destination_floor" function.
     pthread_exit(NULL);
