@@ -38,8 +38,8 @@ internal: $(INTERNAL_OBJ) $(NETWORK_UTILS_OBJ) $(COMMON_OBJ)  # Link against net
 
 
 # Rule to build safety executable
-safety: $(SAFETY_OBJ)
-	$(CC) $(CFLAGS) -o safety $(SAFETY_OBJ)
+safety: $(SAFETY_OBJ) $(COMMON_OBJ)  # Link against common.o
+	$(CC) $(CFLAGS) -o safety $(SAFETY_OBJ) $(COMMON_OBJ)
 
 # Rule to build controller executable
 controller: $(CONTROLLER_OBJ) $(NETWORK_UTILS_OBJ) $(COMMON_OBJ)  # Link against network_utils.o and common.o

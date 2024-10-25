@@ -1,44 +1,31 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/mman.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <ctype.h>
+#include "common.h"
 
-#define FLOOR_LENGTH 4U
-#define STATUS_LENGTH 8U
-#define MAX_CAR_NAME_LENGTH 100U
-#define SUCCESS 0
-#define FAILURE 1
+// Not allowed, will have to remove later.
+#include <stdio.h>
 
-typedef struct
-{
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    char current_floor[FLOOR_LENGTH];
-    char destination_floor[FLOOR_LENGTH];
-    char status[STATUS_LENGTH];
-    uint8_t open_button;
-    uint8_t close_button;
-    uint8_t door_obstruction;
-    uint8_t overload;
-    uint8_t emergency_stop;
-    uint8_t individual_service_mode;
-    uint8_t emergency_mode;
-} car_shared_mem;
+// TODO:
+// Write a custom function for snprintf.
 
+// Constants for clarity and magic number avoidance
+const uint32_t STATUS_LENGTH = 8U;
+const uint32_t MAX_CAR_NAME_LENGTH = 100U;
+const uint8_t DOOR_OBSTRUCTION_ON = 1U;
+const uint8_t EMERGENCY_STOP_ON = 1U;
+const uint8_t EMERGENCY_MODE_ON = 1U;
+const uint8_t EMERGENCY_MODE_OFF = 0U;
+const uint8_t EXIT_FAILURE = 1U;
+const uint8_t EXIT_SUCCESS = 0U;
+
+// Function prototypes
 void custom_print(const char *str);
-int string_compare(const char *str1, const char *str2);
 int check_data_consistency(const car_shared_mem *shared_mem);
 int is_valid_floor(const char *floor);
 
@@ -47,87 +34,100 @@ int main(int argc, char **argv)
     if (argc != 2)
     {
         custom_print("Usage: {car name}\n");
-        return FAILURE;
+        return EXIT_FAILURE;
     }
 
-    car_shared_mem *ptr = NULL;
+    car_shared_mem *shared_mem = NULL;
     {
         char car_name[MAX_CAR_NAME_LENGTH];
 
+        // Construct the shared memory name safely
         if (snprintf(car_name, sizeof(car_name), "/car%s", argv[1]) < 0)
         {
-            return FAILURE;
+            custom_print("Failed to create car name.\n");
+            return EXIT_FAILURE;
         }
 
         int shm_fd = shm_open(car_name, O_RDWR, 0666);
-
         if (shm_fd == -1)
         {
             custom_print("Unable to access car ");
             custom_print(argv[1]);
             custom_print(".\n");
-            return FAILURE;
+            return EXIT_FAILURE;
         }
 
-        ptr = (car_shared_mem *)mmap(NULL, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-
-        if (ptr == MAP_FAILED)
+        shared_mem = (car_shared_mem *)mmap(NULL, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+        if (shared_mem == MAP_FAILED)
         {
-            return FAILURE;
+            custom_print("Memory mapping failed.\n");
+            return EXIT_FAILURE;
         }
     }
 
-    /* This loop is an exception to MISRA C, document justification as per project requirements */
+    // This loop is an exception to MISRA C; document justification as per project requirements
     while (1)
     {
-        int ret = pthread_mutex_lock(&ptr->mutex);
-        if (ret != SUCCESS)
+        int ret = pthread_mutex_lock(&shared_mem->mutex);
+        if (ret != 0)
         {
             custom_print("Failed to lock mutex.\n");
             break;
         }
 
-        ret = pthread_cond_wait(&ptr->cond, &ptr->mutex);
-        if (ret != SUCCESS)
+        ret = pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+        if (ret != 0)
         {
             custom_print("Failed to wait on condition variable.\n");
-            pthread_mutex_unlock(&ptr->mutex);
+            pthread_mutex_unlock(&shared_mem->mutex);
             break;
         }
 
-        if ((ptr->door_obstruction == 1U) && (string_compare(ptr->status, "Closing") == 0))
+        // Check for door obstruction
+        if ((shared_mem->door_obstruction == DOOR_OBSTRUCTION_ON) &&
+            (strcmp(shared_mem->status, "Closing\n") == 0))
         {
-            (void)strncpy(ptr->status, "Opening", STATUS_LENGTH - 1U);
-            ptr->status[STATUS_LENGTH - 1U] = '\0';
+            strncpy(shared_mem->status, "Opening", STATUS_LENGTH - 1U);
+            shared_mem->status[STATUS_LENGTH - 1U] = '\0';
         }
 
-        if ((ptr->emergency_stop == 1U) && (ptr->emergency_mode == 0U))
+        // Check for emergency stop condition
+        if ((shared_mem->emergency_stop == EMERGENCY_STOP_ON) &&
+            (shared_mem->emergency_mode == EMERGENCY_MODE_OFF))
         {
             custom_print("The emergency stop button has been pressed!\n");
-            ptr->emergency_mode = 1U;
+            shared_mem->emergency_mode = EMERGENCY_MODE_ON;
         }
 
-        if (ptr->overload == 1U && ptr->emergency_mode == 0U)
+        // Check for overload condition
+        if ((shared_mem->overload == 1U) && (shared_mem->emergency_mode == EMERGENCY_MODE_OFF))
         {
             custom_print("The overload sensor has been tripped!\n");
-            ptr->emergency_mode = 1U;
+            shared_mem->emergency_mode = EMERGENCY_MODE_ON;
         }
 
-        if (check_data_consistency(ptr) == 0)
+        // Validate data consistency
+        if (check_data_consistency(shared_mem) == 0)
         {
             custom_print("Data consistency error!\n");
-            ptr->emergency_mode = 1U;
+            shared_mem->emergency_mode = EMERGENCY_MODE_ON;
         }
 
-        ret = pthread_mutex_unlock(&ptr->mutex);
-        if (ret != SUCCESS)
+        ret = pthread_mutex_unlock(&shared_mem->mutex);
+        if (ret != 0)
         {
             custom_print("Failed to unlock mutex.\n");
             break;
         }
     }
 
-    return SUCCESS;
+    return EXIT_SUCCESS;
+}
+
+void custom_perror(const char *msg) {
+    if (msg != NULL) {
+        write(STDERR_FILENO, msg, strlen(msg));
+    }
 }
 
 void custom_print(const char *str)
@@ -135,52 +135,35 @@ void custom_print(const char *str)
     if (str != NULL)
     {
         size_t length = strlen(str);
-
         ssize_t bytes_written = write(STDOUT_FILENO, str, length);
         if (bytes_written < 0)
         {
-            perror("write error");
+            custom_perror("write fail\n");
         }
     }
-}
-
-int string_compare(const char *str1, const char *str2)
-{
-    if (str1 == NULL || str2 == NULL)
-    {
-        return -1;
-    }
-
-    while (*str1 != '\0' && *str2 != '\0' && *str1 == *str2)
-    {
-        str1++;
-        str2++;
-    }
-    
-    return *str1 - *str2;
 }
 
 int is_valid_floor(const char *floor)
 {
     if (strlen(floor) > 3U)
     {
-        return 0;
+        return 0; // Invalid length
     }
 
     if (isalpha(floor[0]) && floor[0] != 'B')
     {
-        return 0;
+        return 0; // Invalid floor designation
     }
 
     for (size_t i = 1U; i < strlen(floor); i++)
     {
         if (!isdigit((unsigned char)floor[i]))
         {
-            return 0;
+            return 0; // Invalid character
         }
     }
 
-    return 1;
+    return 1; // Valid floor
 }
 
 int check_data_consistency(const car_shared_mem *shared_mem)
@@ -188,45 +171,47 @@ int check_data_consistency(const car_shared_mem *shared_mem)
     const char *status_names[] = {
         "Opening", "Open", "Closing", "Closed", "Between"};
 
-    if (shared_mem->emergency_mode != 1U)
+    if (shared_mem->emergency_mode != EMERGENCY_MODE_ON)
     {
         if (!is_valid_floor(shared_mem->current_floor) || !is_valid_floor(shared_mem->destination_floor))
         {
-            return 0;
+            return 0; // Invalid floor data
         }
 
         int is_valid_status = 0;
-
-        for (size_t i = 0U; i < 5U; i++)
+        for (size_t i = 0U; i < sizeof(status_names) / sizeof(status_names[0]); i++)
         {
-            if (string_compare(shared_mem->status, status_names[i]) == 0)
+            if (strcmp(shared_mem->status, status_names[i]) == 0)
             {
-                is_valid_status = 1;
+                is_valid_status = 1; // Valid status found
+                break;
             }
         }
 
         if (is_valid_status == 0)
         {
-            return 0;
+            return 0; // Invalid status
         }
 
+        // Check if button states are valid
         if (shared_mem->open_button > 1U || shared_mem->close_button > 1U ||
             shared_mem->door_obstruction > 1U || shared_mem->overload > 1U ||
             shared_mem->emergency_stop > 1U || shared_mem->individual_service_mode > 1U ||
             shared_mem->emergency_mode > 1U)
         {
-            return 0;
+            return 0; // Invalid button state
         }
 
-        if (shared_mem->door_obstruction == 1U)
+        // Check door obstruction state
+        if (shared_mem->door_obstruction == DOOR_OBSTRUCTION_ON)
         {
-            if (!(string_compare(shared_mem->status, "Opening") == 0 ||
-                  string_compare(shared_mem->status, "Closing") == 0))
+            if (!(strcmp(shared_mem->status, "Opening") == 0 ||
+                  strcmp(shared_mem->status, "Closing") == 0))
             {
-                return 0;
+                return 0; // Invalid status for door obstruction
             }
         }
     }
 
-    return 1;
+    return 1; // Data is consistent
 }
