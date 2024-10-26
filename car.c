@@ -44,7 +44,7 @@ pthread_cond_t delay_cond = PTHREAD_COND_INITIALIZER;
 int controller_sock_fd;
 
 // Function definitions:
-void terminate_shared_memory(int sig_num);
+void cleanup(int sig_num);
 void *go_through_sequence(void *arg);
 void *handle_button_press(void *arg);
 void *individual_service_mode(void *arg);
@@ -60,7 +60,8 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    signal(SIGINT, terminate_shared_memory);
+    signal(SIGINT, cleanup);
+    signal(SIGTERM, cleanup);
 
     // Ensure the car doesn't crash when write fails.
     signal(SIGPIPE, SIG_IGN);
@@ -473,7 +474,6 @@ void *connect_to_controller(void *arg)
 
     pthread_exit(NULL);
 }
-
 
 void terminate_shared_memory(int sig_num)
 {
