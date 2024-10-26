@@ -44,7 +44,7 @@ pthread_cond_t delay_cond = PTHREAD_COND_INITIALIZER;
 int controller_sock_fd;
 
 // Function definitions:
-void cleanup(int sig_num);
+void terminate_shared_memory(int sig_num);
 void *go_through_sequence(void *arg);
 void *handle_button_press(void *arg);
 void *individual_service_mode(void *arg);
@@ -60,8 +60,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    signal(SIGINT, cleanup);
-    signal(SIGTERM, cleanup);
+    signal(SIGINT, terminate_shared_memory);
 
     // Ensure the car doesn't crash when write fails.
     signal(SIGPIPE, SIG_IGN);
@@ -387,7 +386,6 @@ void *normal_operation(void *arg)
 
 void *connect_to_controller(void *arg)
 {
-    // Create the socket
     controller_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (controller_sock_fd == -1)
     {
@@ -395,15 +393,6 @@ void *connect_to_controller(void *arg)
         pthread_exit(NULL);
     }
 
-    int opt = 1;
-    if (setsockopt(controller_sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-    {
-        perror("setsockopt()");
-        close(controller_sock_fd);
-        pthread_exit(NULL);
-    }
-
-    // Set up the address structure
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -423,12 +412,10 @@ void *connect_to_controller(void *arg)
         pthread_exit(NULL);
     }
 
-    // Connection successful; send initialization and status messages
     char car_initialisation_message[256];
     sprintf(car_initialisation_message, "CAR %s %s %s", car_info.name, car_info.lowest_floor, car_info.highest_floor);
     send_message(controller_sock_fd, car_initialisation_message);
 
-    // Lock shared memory mutex to read status and floor info safely
     char status_message[256];
     pthread_mutex_lock(&shared_mem->mutex);
     sprintf(status_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
@@ -475,31 +462,16 @@ void *connect_to_controller(void *arg)
     pthread_exit(NULL);
 }
 
+
 void terminate_shared_memory(int sig_num)
 {
-    // Ignore further SIGINT signals to prevent re-entrancy issues
-    signal(SIGINT, SIG_IGN);
+    signal(SIGINT, terminate_shared_memory);
 
-    // Gracefully shut down the socket if it’s open
-    if (controller_sock_fd != -1)
-    {
-        shutdown(controller_sock_fd, SHUT_RDWR); // Disable both reading and writing
-        close(controller_sock_fd);
-        controller_sock_fd = -1;
-    }
+    munmap(shared_mem, sizeof(car_shared_mem));
 
-    // Clean up shared memory
-    if (shared_mem != MAP_FAILED)
-    {
-        munmap(shared_mem, sizeof(car_shared_mem));
-    }
+    close(shm_fd);
 
-    if (shm_fd != -1)
-    {
-        close(shm_fd);
-        shm_unlink(car_name);
-    }
+    shm_unlink(car_name);
 
-    // Exit immediately
-    _exit(0); // _exit() ensures no cleanup by other threads
+    exit(0);
 }
