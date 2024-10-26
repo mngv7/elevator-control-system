@@ -144,6 +144,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+<<<<<<< HEAD
     pthread_t connect_to_controller_thread;
     if (pthread_create(&connect_to_controller_thread, NULL, connect_to_controller, NULL) != 0)
     {
@@ -151,6 +152,15 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
     pthread_join(connect_to_controller_thread, NULL);
+=======
+    pthread_t controller_connection_thread;
+    if (pthread_create(&controller_connection_thread, NULL, connect_to_controller, NULL) != 0)
+    {
+        perror("pthread_create() for controller connection.");
+        exit(EXIT_FAILURE);
+    }
+    pthread_join(controller_connection_thread, NULL);
+>>>>>>> 48da8d9 (Experimenting with controller connection.)
 
     pthread_join(button_thread, NULL);
     pthread_join(individual_service_mode_thread, NULL);
@@ -386,13 +396,27 @@ void *normal_operation(void *arg)
 
 void *connect_to_controller(void *arg)
 {
+    // Create the socket
     controller_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (controller_sock_fd == -1)
     {
         perror("socket()");
+<<<<<<< HEAD
+        pthread_exit(NULL);
+=======
+        pthread_exit(NULL); // Exit thread on socket creation failure
+>>>>>>> 48da8d9 (Experimenting with controller connection.)
+    }
+
+    int opt = 1;
+    if (setsockopt(controller_sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    {
+        perror("setsockopt()");
+        close(controller_sock_fd);
         pthread_exit(NULL);
     }
 
+    // Set up the address structure
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -403,6 +427,7 @@ void *connect_to_controller(void *arg)
     {
         fprintf(stderr, "inet_pton(%s)\n", ipaddress);
         close(controller_sock_fd);
+<<<<<<< HEAD
         pthread_exit(NULL);
     }
 
@@ -410,18 +435,33 @@ void *connect_to_controller(void *arg)
     {
         close(controller_sock_fd);
         pthread_exit(NULL);
+=======
+        controller_sock_fd = -1;
+        pthread_exit(NULL); // Exit thread on IP conversion failure
     }
 
+    // Attempt to connect to the controller
+    if (connect(controller_sock_fd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
+    {
+        close(controller_sock_fd);
+        controller_sock_fd = -1;
+        pthread_exit(NULL); // Exit if connection fails
+>>>>>>> 48da8d9 (Experimenting with controller connection.)
+    }
+
+    // Connection successful; send initialization and status messages
     char car_initialisation_message[256];
     sprintf(car_initialisation_message, "CAR %s %s %s", car_info.name, car_info.lowest_floor, car_info.highest_floor);
     send_message(controller_sock_fd, car_initialisation_message);
 
+    // Lock shared memory mutex to read status and floor info safely
     char status_message[256];
     pthread_mutex_lock(&shared_mem->mutex);
     sprintf(status_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
     pthread_mutex_unlock(&shared_mem->mutex);
     send_message(controller_sock_fd, status_message);
 
+<<<<<<< HEAD
     while (1)
     {
         char *message_from_controller = receive_msg(controller_sock_fd);
@@ -455,6 +495,12 @@ void *connect_to_controller(void *arg)
 
         free(message_from_controller);
     }
+=======
+    // Shut down and close the socket once done
+    shutdown(controller_sock_fd, SHUT_RDWR); // Disable both reading and writing
+    close(controller_sock_fd);
+    controller_sock_fd = -1;
+>>>>>>> 48da8d9 (Experimenting with controller connection.)
 
     shutdown(controller_sock_fd, SHUT_RDWR); // Disable both reading and writing
     close(controller_sock_fd);
@@ -465,13 +511,29 @@ void *connect_to_controller(void *arg)
 
 void terminate_shared_memory(int sig_num)
 {
-    signal(SIGINT, terminate_shared_memory);
+    // Ignore further SIGINT signals to prevent re-entrancy issues
+    signal(SIGINT, SIG_IGN);
 
-    munmap(shared_mem, sizeof(car_shared_mem));
+    // Gracefully shut down the socket if it’s open
+    if (controller_sock_fd != -1)
+    {
+        shutdown(controller_sock_fd, SHUT_RDWR); // Disable both reading and writing
+        close(controller_sock_fd);
+        controller_sock_fd = -1;
+    }
 
-    close(shm_fd);
+    // Clean up shared memory
+    if (shared_mem != MAP_FAILED)
+    {
+        munmap(shared_mem, sizeof(car_shared_mem));
+    }
 
-    shm_unlink(car_name);
+    if (shm_fd != -1)
+    {
+        close(shm_fd);
+        shm_unlink(car_name);
+    }
 
-    exit(0);
+    // Exit immediately
+    _exit(0); // _exit() ensures no cleanup by other threads
 }
