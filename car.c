@@ -307,7 +307,7 @@ void delay()
         pthread_mutex_lock(&early_exit_delay_mutex);
         if (early_exit_delay)
         {
-            early_exit_delay = 1;
+            early_exit_delay = 0;
             pthread_mutex_unlock(&early_exit_delay_mutex);
             pthread_mutex_unlock(&delay_mutex);
             return; // Exit early
