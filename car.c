@@ -144,6 +144,14 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    pthread_t connect_to_controller_thread;
+    if (pthread_create(&connect_to_controller_thread, NULL, connect_to_controller, NULL) != 0)
+    {
+        perror("pthread_create() for individual service mode thread.");
+        exit(EXIT_FAILURE);
+    }
+    pthread_join(connect_to_controller_thread, NULL);
+
     pthread_join(button_thread, NULL);
     pthread_join(individual_service_mode_thread, NULL);
     pthread_join(go_through_sequence_thread, NULL);
@@ -382,7 +390,7 @@ void *connect_to_controller(void *arg)
     if (controller_sock_fd == -1)
     {
         perror("socket()");
-        exit(1);
+        pthread_exit(NULL);
     }
 
     struct sockaddr_in addr;
@@ -394,22 +402,24 @@ void *connect_to_controller(void *arg)
     if (inet_pton(AF_INET, ipaddress, &addr.sin_addr) != 1)
     {
         fprintf(stderr, "inet_pton(%s)\n", ipaddress);
-        exit(1);
+        close(controller_sock_fd);
+        pthread_exit(NULL);
     }
 
-    connect(controller_sock_fd, (const struct sockaddr *)&addr, sizeof(addr));
+    if (connect(controller_sock_fd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
+    {
+        close(controller_sock_fd);
+        pthread_exit(NULL);
+    }
 
     char car_initialisation_message[256];
-
     sprintf(car_initialisation_message, "CAR %s %s %s", car_info.name, car_info.lowest_floor, car_info.highest_floor);
     send_message(controller_sock_fd, car_initialisation_message);
 
     char status_message[256];
-
     pthread_mutex_lock(&shared_mem->mutex);
     sprintf(status_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
     pthread_mutex_unlock(&shared_mem->mutex);
-
     send_message(controller_sock_fd, status_message);
 
     while (1)
@@ -439,14 +449,19 @@ void *connect_to_controller(void *arg)
         }
         else
         {
+            free(message_from_controller);
             break;
         }
 
         free(message_from_controller);
     }
 
+    shutdown(controller_sock_fd, SHUT_RDWR); // Disable both reading and writing
+    close(controller_sock_fd);
+
     pthread_exit(NULL);
 }
+
 
 void terminate_shared_memory(int sig_num)
 {
