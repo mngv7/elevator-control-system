@@ -62,7 +62,7 @@ char *receive_msg(int fd)
     return buf;
 }
 
-int establish_connection()
+int establish_connection_client()
 {
     // Create a new socket for each request.
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -96,6 +96,46 @@ int establish_connection()
     if (connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
     {
         printf("Unable to connect to elevator system.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    return sockfd;
+}
+
+int establish_connection_server()
+{
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1)
+    {
+        perror("socket()");
+        exit(EXIT_FAILURE);
+    }
+
+    // Set socket options
+    int opt_enable = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt_enable, sizeof(opt_enable)) == -1)
+    {
+        perror("setsockopt()");
+        exit(EXIT_FAILURE);
+    }
+
+    // Bind the socket to the address
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(3000);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
+    {
+        perror("bind()");
+        exit(EXIT_FAILURE);
+    }
+
+    // Listen for incoming connections
+    if (listen(sockfd, 10) == -1)
+    {
+        perror("listen()");
         exit(EXIT_FAILURE);
     }
 

@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include "network_utils.h"
 #include "common.h"
+#include <signal.h>
 
 typedef struct
 {
@@ -63,6 +64,8 @@ void *update_call_queue(void *arg);
 void remove_car_from_list(int car_fd);
 void add_car_to_list(car_information new_car);
 void print_car_list();
+void print_call_list();
+
 char get_call_direction(const char *source, const char *destination);
 void add_call_request(call_requests new_call);
 char *get_and_pop_first_stop(int socket_fd);
@@ -72,40 +75,8 @@ CarNode *choose_car(char *source_floor, char *destination_floor);
 int main()
 {
     // Create a socket
-    int listensockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (listensockfd == -1)
-    {
-        perror("socket()");
-        exit(EXIT_FAILURE);
-    }
-
-    // Set socket options
-    int opt_enable = 1;
-    if (setsockopt(listensockfd, SOL_SOCKET, SO_REUSEADDR, &opt_enable, sizeof(opt_enable)) == -1)
-    {
-        perror("setsockopt()");
-        exit(EXIT_FAILURE);
-    }
-
-    // Bind the socket to the address
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(3000);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    if (bind(listensockfd, (const struct sockaddr *)&addr, sizeof(addr)) == -1)
-    {
-        perror("bind()");
-        exit(EXIT_FAILURE);
-    }
-
-    // Listen for incoming connections
-    if (listen(listensockfd, 10) == -1)
-    {
-        perror("listen()");
-        exit(EXIT_FAILURE);
-    }
+    int listensockfd = establish_connection_server();
+    signal(SIGPIPE, SIG_IGN);
 
     for (;;)
     {
@@ -122,6 +93,8 @@ int main()
 
         if (strncmp(msg, "CAR", 3) == 0)
         {
+            printf(">>> Car received: %s\n", msg);
+
             car_information new_car;
             sscanf(msg, "CAR %99s %3s %3s", new_car.name, new_car.lowest_floor, new_car.highest_floor);
             new_car.car_fd = clientfd;
@@ -140,7 +113,7 @@ int main()
         }
         else if (strncmp(msg, "CALL", 4) == 0)
         {
-            // printf("Call received: %s\n", msg);
+            printf("--- Call received: %s\n", msg);
             char source_floor[4], destination_floor[4];
             sscanf(msg, "CALL %3s %3s", source_floor, destination_floor);
 
@@ -215,20 +188,6 @@ int is_car_available(char *source_floor, char *destination_floor, CarNode *car)
     return 1;
 }
 
-int has_call_for_car(int car_clientfd)
-{
-    CallNode *current = call_list_head;
-    while (current != NULL)
-    {
-        if (current->call.assigned_car_fd == car_clientfd)
-        {
-            return 1; // Found a call for this car
-        }
-        current = current->next;
-    }
-    return 0; // No call for this car
-}
-
 void *status_checking_thread(void *arg)
 {
     int car_clientfd = *((int *)arg);
@@ -249,7 +208,7 @@ void *status_checking_thread(void *arg)
     char status[8];
     char current_floor[4];
     char destination_floor[4];
-    
+
     while (1)
     {
         char *msg = receive_msg(car_clientfd);
@@ -314,11 +273,11 @@ void *handle_car(void *arg)
     {
         pthread_mutex_lock(&call_list_mutex);
 
-        char *next_stop = get_and_pop_first_stop(car_clientfd);
-
         if ((strcmp(car_node->car_info.current_floor, car_node->car_info.destination_floor) == 0) ||
             (strcmp(car_node->car_info.status, "Opening") == 0))
         {
+            char *next_stop = get_and_pop_first_stop(car_clientfd);
+
             if (strcmp(next_stop, "E") != 0) // If there's a valid next stop
             {
                 snprintf(dispatched_floor, sizeof(dispatched_floor), "%s", next_stop);
@@ -366,6 +325,7 @@ char *get_and_pop_first_stop(int socket_fd)
                 previous->next = current->next;
             }
 
+            //printf("Removing %s from the call list!\n", current->call.floor);
             free(current);
             return first_floor; // Return the floor value of the deleted node
         }
@@ -392,9 +352,24 @@ void *update_call_queue(void *arg)
     free(call_info->destination_floor);
     free(call_info);
 
+    //print_call_list();
+
     pthread_exit(NULL);
 }
 
+int has_call_for_car(int car_clientfd)
+{
+    CallNode *current = call_list_head;
+    while (current != NULL)
+    {
+        if (current->call.assigned_car_fd == car_clientfd)
+        {
+            return 1; // Found a call for this car
+        }
+        current = current->next;
+    }
+    return 0; // No call for this car
+}
 
 void add_call_request(call_requests new_call)
 {
@@ -485,10 +460,12 @@ void print_car_list()
 
 void print_call_list()
 {
+    printf("======= Call List =======\n");
     pthread_mutex_lock(&call_list_mutex);
     for (CallNode *curr = call_list_head; curr != NULL; curr = curr->next)
     {
         printf("Call Direction: %c, Floor: %s\n", curr->call.direction, curr->call.floor);
     }
     pthread_mutex_unlock(&call_list_mutex);
+    printf("=========================\n");
 }
