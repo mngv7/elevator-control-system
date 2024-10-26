@@ -42,6 +42,7 @@ pthread_mutex_t early_exit_delay_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t delay_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t delay_cond = PTHREAD_COND_INITIALIZER;
 int controller_sock_fd;
+int connection_made = 0;
 
 // Function definitions:
 void terminate_shared_memory(int sig_num);
@@ -50,6 +51,7 @@ void *handle_button_press(void *arg);
 void *individual_service_mode(void *arg);
 char get_call_direction(const char *source, const char *destination);
 void *connect_to_controller(void *arg);
+void *send_status_messages(void *arg);
 void delay();
 
 int main(int argc, char **argv)
@@ -150,8 +152,15 @@ int main(int argc, char **argv)
         perror("pthread_create() for individual service mode thread.");
         exit(EXIT_FAILURE);
     }
-    pthread_join(connect_to_controller_thread, NULL);
 
+    pthread_t status_messages_thread;
+    if (pthread_create(&status_messages_thread, NULL, send_status_messages, NULL) != 0)
+    {
+        perror("pthread_create() for individual service mode thread.");
+        exit(EXIT_FAILURE);
+    }
+    pthread_join(status_messages_thread, NULL);
+    pthread_join(connect_to_controller_thread, NULL);
     pthread_join(button_thread, NULL);
     pthread_join(individual_service_mode_thread, NULL);
     pthread_join(go_through_sequence_thread, NULL);
@@ -323,13 +332,6 @@ void delay()
     pthread_mutex_unlock(&delay_mutex);
 }
 
-// Send messages in the form:
-// STATUS {status} {current floor} {destination floor}
-
-// This message should be sent when:
-// - Immediately after the car initialisation message (complete).
-// - Everytime the shared memory changes (check condition variable)
-// - If delay (ms) has passed since the last message.
 void *send_status_messages(void *arg)
 {
     // Send messages in the form:
@@ -338,13 +340,16 @@ void *send_status_messages(void *arg)
     char status_message[256];
     while (1)
     {
-        pthread_mutex_lock(&shared_mem->mutex);
-        pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+        if (connection_made)
+        {
+            pthread_mutex_lock(&shared_mem->mutex);
+            pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
 
-        sprintf(status_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
+            sprintf(status_message, "STATUS %s %s %s", shared_mem->status, shared_mem->current_floor, shared_mem->destination_floor);
 
-        pthread_mutex_unlock(&shared_mem->mutex);
-        send_message(controller_sock_fd, status_message);
+            pthread_mutex_unlock(&shared_mem->mutex);
+            send_message(controller_sock_fd, status_message);
+        }
     }
 
     // This message should be sent when:
@@ -412,6 +417,8 @@ void *connect_to_controller(void *arg)
         pthread_exit(NULL);
     }
 
+    connection_made = 1;
+
     char car_initialisation_message[256];
     sprintf(car_initialisation_message, "CAR %s %s %s", car_info.name, car_info.lowest_floor, car_info.highest_floor);
     send_message(controller_sock_fd, car_initialisation_message);
@@ -461,7 +468,6 @@ void *connect_to_controller(void *arg)
 
     pthread_exit(NULL);
 }
-
 
 void terminate_shared_memory(int sig_num)
 {
