@@ -1,19 +1,45 @@
+/**
+ * safety.c - Elevator Safety Critical Component
+ * 
+ * Deviations from MISRA C Guidelines:
+ * 1) Infinite Loop: Necessary for continuous operation in real-time systems.
+ * 2) Use of stdio.h: Used for custom print functions to handle error messages.
+ * 3) Use of pthreads: Required for synchronization in a multi-threaded environment.
+ * 4) snprintf: Used for safe string handling, despite being part of stdio.h.
+ * 5) use of strcpy: Necessary for string manipulation.
+ * 
+ * Justifications:
+ * - Infinite loops are essential for real-time systems that need continuous operation.
+ * - Standard I/O functions are used in a controlled manner for error reporting.
+ * - Pthreads provide necessary synchronization primitives for concurrent operations.
+ * - snprintf and strcpy are used with sufficient bounds checking to avoid buffer overflows.
+ */
+
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <errno.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <ctype.h>
-#include "common.h"
 #include <stdio.h> // DEVIATION
 
-// Page 96
-
-// ctrl+ F these things:
-// DEVIATION
-// VIOLATE
+// Struct for shared memory
+typedef struct
+{
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    char current_floor[4];
+    char destination_floor[4];
+    char status[8];
+    uint8_t open_button;
+    uint8_t close_button;
+    uint8_t door_obstruction;
+    uint8_t overload;
+    uint8_t emergency_stop;
+    uint8_t individual_service_mode;
+    uint8_t emergency_mode;
+} car_shared_mem;
 
 // Constants for clarity and magic number avoidance
 const uint32_t STATUS_LENGTH = 8U;
@@ -29,6 +55,7 @@ const uint8_t EXIT_SUCCESS = 0U;
 void custom_print(const char *string_to_print);
 int check_data_consistency(const car_shared_mem *shared_mem);
 int is_valid_floor(const char *floor);
+void handle_conditions(car_shared_mem *shared_mem);
 
 int main(int argc, char **argv)
 {
@@ -66,8 +93,7 @@ int main(int argc, char **argv)
         }
     }
 
-    // This loop is an exception to MISRA C; document justification as per project requirements
-    while (1)
+    while (1) // Infinite loop: justified for continuous operation
     {
         int ret = pthread_mutex_lock(&shared_mem->mutex);
         if (ret != 0)
@@ -84,35 +110,7 @@ int main(int argc, char **argv)
             break;
         }
 
-        // Check for door obstruction
-        if ((shared_mem->door_obstruction == DOOR_OBSTRUCTION_ON) &&
-            (strcmp(shared_mem->status, "Closing\n") == 0))
-        {
-            strncpy(shared_mem->status, "Opening", STATUS_LENGTH - 1U);
-            shared_mem->status[STATUS_LENGTH - 1U] = '\0';
-        }
-
-        // Check for emergency stop condition
-        if ((shared_mem->emergency_stop == EMERGENCY_STOP_ON) &&
-            (shared_mem->emergency_mode == EMERGENCY_MODE_OFF))
-        {
-            custom_print("The emergency stop button has been pressed!\n");
-            shared_mem->emergency_mode = EMERGENCY_MODE_ON;
-        }
-
-        // Check for overload condition
-        if ((shared_mem->overload == 1U) && (shared_mem->emergency_mode == EMERGENCY_MODE_OFF))
-        {
-            custom_print("The overload sensor has been tripped!\n");
-            shared_mem->emergency_mode = EMERGENCY_MODE_ON;
-        }
-
-        // Validate data consistency
-        if (check_data_consistency(shared_mem) == 0)
-        {
-            custom_print("Data consistency error!\n");
-            shared_mem->emergency_mode = EMERGENCY_MODE_ON;
-        }
+        handle_conditions(shared_mem);
 
         ret = pthread_mutex_unlock(&shared_mem->mutex);
         if (ret != 0)
@@ -125,12 +123,6 @@ int main(int argc, char **argv)
     return EXIT_SUCCESS;
 }
 
-void custom_perror(const char *msg) {
-    if (msg != NULL) {
-        write(STDERR_FILENO, msg, strlen(msg));
-    }
-}
-
 void custom_print(const char *str)
 {
     if (str != NULL)
@@ -139,7 +131,7 @@ void custom_print(const char *str)
         ssize_t bytes_written = write(STDOUT_FILENO, str, length);
         if (bytes_written < 0)
         {
-            custom_perror("write fail\n");
+            write(STDERR_FILENO, "write fail\n", 11);
         }
     }
 }
@@ -170,21 +162,20 @@ int is_valid_floor(const char *floor)
 int check_data_consistency(const car_shared_mem *shared_mem)
 {
     const char *status_names[] = {
-        "Opening", "Open", "Closing", "Closed", "Between"
-    };
+        "Opening", "Open", "Closing", "Closed", "Between"};
 
     if (shared_mem->emergency_mode != EMERGENCY_MODE_ON)
     {
         // Create temporary buffers to ensure null-termination
-        char current_floor_buffer[sizeof(shared_mem->current_floor)]; // Size: 4
+        char current_floor_buffer[sizeof(shared_mem->current_floor)];         // Size: 4
         char destination_floor_buffer[sizeof(shared_mem->destination_floor)]; // Size: 4
 
         // Safely copy the current and destination floors to ensure null-termination
-        strncpy(current_floor_buffer, shared_mem->current_floor, sizeof(current_floor_buffer) - 1); // VIOLATE 21.18
-        current_floor_buffer[sizeof(current_floor_buffer) - 1] = '\0'; // Null-terminate
+        strncpy(current_floor_buffer, shared_mem->current_floor, sizeof(current_floor_buffer) - 1); // DEVIATION
+        current_floor_buffer[sizeof(current_floor_buffer) - 1] = '\0';                              // Null-terminate
 
-        strncpy(destination_floor_buffer, shared_mem->destination_floor, sizeof(destination_floor_buffer) - 1); // VIOLATE 21.18
-        destination_floor_buffer[sizeof(destination_floor_buffer) - 1] = '\0'; // Null-terminate
+        strncpy(destination_floor_buffer, shared_mem->destination_floor, sizeof(destination_floor_buffer) - 1); // DEVIATION
+        destination_floor_buffer[sizeof(destination_floor_buffer) - 1] = '\0';                                  // Null-terminate
 
         // Validate floors
         if (!is_valid_floor(current_floor_buffer) || !is_valid_floor(destination_floor_buffer))
@@ -230,3 +221,35 @@ int check_data_consistency(const car_shared_mem *shared_mem)
     return 1; // Data is consistent
 }
 
+void handle_conditions(car_shared_mem *shared_mem)
+{
+    // Check for door obstruction
+    if ((shared_mem->door_obstruction == DOOR_OBSTRUCTION_ON) &&
+        (strcmp(shared_mem->status, "Closing") == 0))
+    {
+        strncpy(shared_mem->status, "Opening", STATUS_LENGTH - 1U);
+        shared_mem->status[STATUS_LENGTH - 1U] = '\0';
+    }
+
+    // Check for emergency stop condition
+    if ((shared_mem->emergency_stop == EMERGENCY_STOP_ON) &&
+        (shared_mem->emergency_mode == EMERGENCY_MODE_OFF))
+    {
+        custom_print("The emergency stop button has been pressed!\n");
+        shared_mem->emergency_mode = EMERGENCY_MODE_ON;
+    }
+
+    // Check for overload condition
+    if ((shared_mem->overload == 1U) && (shared_mem->emergency_mode == EMERGENCY_MODE_OFF))
+    {
+        custom_print("The overload sensor has been tripped!\n");
+        shared_mem->emergency_mode = EMERGENCY_MODE_ON;
+    }
+
+    // Validate data consistency
+    if (check_data_consistency(shared_mem) == 0)
+    {
+        custom_print("Data consistency error!\n");
+        shared_mem->emergency_mode = EMERGENCY_MODE_ON;
+    }
+}
