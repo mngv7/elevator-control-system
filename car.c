@@ -362,8 +362,6 @@ void *send_status_messages(void *arg)
 // - Change its status to Between
 // - Wait (delay) ms
 // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
-
-// If the current floor and destination floor are equal, call "reached_destination_floor" function.
 void *normal_operation(void *arg)
 {
     while (1)
@@ -384,8 +382,6 @@ void *normal_operation(void *arg)
         }
         pthread_mutex_unlock(&shared_mem->mutex);
     }
-
-    // If the current floor and destination floor are equal, call "reached_destination_floor" function.
     pthread_exit(NULL);
 }
 
