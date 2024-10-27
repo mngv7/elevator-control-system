@@ -63,6 +63,7 @@ void *update_call_queue(void *arg);
 void remove_car_from_list(int car_fd);
 void add_car_to_list(car_information new_car);
 void print_car_list();
+void print_call_list();
 char get_call_direction(const char *source, const char *destination);
 void add_call_request(call_requests new_call);
 char *get_and_pop_first_stop(int socket_fd);
@@ -392,6 +393,8 @@ void *update_call_queue(void *arg)
     free(call_info->destination_floor);
     free(call_info);
 
+    //print_call_list();
+
     pthread_exit(NULL);
 }
 
@@ -402,19 +405,119 @@ void add_call_request(call_requests new_call)
     new_node->next = NULL;
 
     pthread_mutex_lock(&call_list_mutex);
+
+    // If the call list is empty
     if (call_list_head == NULL)
     {
         call_list_head = new_node;
+        pthread_mutex_unlock(&call_list_mutex);
+        return;
+    }
+
+    CallNode *current = call_list_head;
+    CallNode *previous = NULL;
+
+    // Handle insertion for Upward Call (U)
+    if (new_call.direction == 'U')
+    {
+        while (current != NULL)
+        {
+            if (current->call.direction == 'U')
+            {
+                if (get_call_direction(current->call.floor, new_call.floor) == 'D')
+                {
+                    // Insert before the current node
+                    if (previous == NULL)
+                    {
+                        // Inserting at the head
+                        new_node->next = call_list_head;
+                        call_list_head = new_node;
+                    }
+                    else
+                    {
+                        previous->next = new_node;
+                        new_node->next = current;
+                    }
+                    pthread_mutex_unlock(&call_list_mutex);
+                    return;
+                }
+            }
+            else if (current->call.direction == 'D')
+            {
+                // Insert before the first downward call
+                if (previous == NULL)
+                {
+                    new_node->next = call_list_head;
+                    call_list_head = new_node;
+                }
+                else
+                {
+                    previous->next = new_node;
+                    new_node->next = current;
+                }
+                pthread_mutex_unlock(&call_list_mutex);
+                return;
+            }
+            previous = current;
+            current = current->next;
+        }
+    }
+    // Handle insertion for Downward Call (D)
+    else if (new_call.direction == 'D')
+    {
+        while (current != NULL)
+        {
+            if (current->call.direction == 'D')
+            {
+                if (get_call_direction(current->call.floor, new_call.floor) == 'U')
+                {
+                    // Insert before the current node
+                    if (previous == NULL)
+                    {
+                        // Inserting at the head
+                        new_node->next = call_list_head;
+                        call_list_head = new_node;
+                    }
+                    else
+                    {
+                        previous->next = new_node;
+                        new_node->next = current;
+                    }
+                    pthread_mutex_unlock(&call_list_mutex);
+                    return;
+                }
+            }
+            else if (current->call.direction == 'U')
+            {
+                // Insert before the first upward call
+                if (previous == NULL)
+                {
+                    new_node->next = call_list_head;
+                    call_list_head = new_node;
+                }
+                else
+                {
+                    previous->next = new_node;
+                    new_node->next = current;
+                }
+                pthread_mutex_unlock(&call_list_mutex);
+                return;
+            }
+            previous = current;
+            current = current->next;
+        }
+    }
+
+    // If no suitable position was found, append to the end of the list
+    if (previous != NULL)
+    {
+        previous->next = new_node;
     }
     else
     {
-        CallNode *current = call_list_head;
-        while (current->next != NULL)
-        {
-            current = current->next;
-        }
-        current->next = new_node;
+        call_list_head = new_node;
     }
+
     pthread_mutex_unlock(&call_list_mutex);
 }
 
@@ -484,10 +587,12 @@ void print_car_list()
 
 void print_call_list()
 {
-    pthread_mutex_lock(&call_list_mutex);
+    printf("========= Call List =========\n");
+        pthread_mutex_lock(&call_list_mutex);
     for (CallNode *curr = call_list_head; curr != NULL; curr = curr->next)
     {
         printf("Call Direction: %c, Floor: %s\n", curr->call.direction, curr->call.floor);
     }
     pthread_mutex_unlock(&call_list_mutex);
+    printf("=============================\n");
 }
