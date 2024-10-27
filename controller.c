@@ -249,7 +249,7 @@ void *status_checking_thread(void *arg)
     char status[8];
     char current_floor[4];
     char destination_floor[4];
-    
+
     while (1)
     {
         char *msg = receive_msg(car_clientfd);
@@ -314,11 +314,11 @@ void *handle_car(void *arg)
     {
         pthread_mutex_lock(&call_list_mutex);
 
-        char *next_stop = get_and_pop_first_stop(car_clientfd);
-
         if ((strcmp(car_node->car_info.current_floor, car_node->car_info.destination_floor) == 0) ||
             (strcmp(car_node->car_info.status, "Opening") == 0))
         {
+            char *next_stop = get_and_pop_first_stop(car_clientfd);
+
             if (strcmp(next_stop, "E") != 0) // If there's a valid next stop
             {
                 snprintf(dispatched_floor, sizeof(dispatched_floor), "%s", next_stop);
@@ -394,7 +394,6 @@ void *update_call_queue(void *arg)
 
     pthread_exit(NULL);
 }
-
 
 void add_call_request(call_requests new_call)
 {
