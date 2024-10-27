@@ -159,6 +159,7 @@ int main(int argc, char **argv)
     return 0;
 }
 
+// Function: handles operations for individual service mode.
 void *individual_service_mode(void *arg)
 {
     while (1)
@@ -194,6 +195,7 @@ void *individual_service_mode(void *arg)
     pthread_exit(NULL);
 }
 
+// Function: updates the car's status based on the button presses.
 void *handle_button_press(void *arg)
 {
     while (1)
@@ -240,6 +242,7 @@ void *handle_button_press(void *arg)
     pthread_exit(NULL);
 }
 
+// Function: state machine for status. Attempt to get the car's status to closed, and react to changes from external programs.
 void *go_through_sequence(void *arg)
 {
     (void)arg;
@@ -284,6 +287,7 @@ void *go_through_sequence(void *arg)
     pthread_exit(NULL);
 }
 
+// Function: delay mechanism that utilizes pthread_cond_timedwait for absolute delays.
 void delay()
 {
     struct timespec ts;
@@ -326,10 +330,7 @@ void delay()
 // Send messages in the form:
 // STATUS {status} {current floor} {destination floor}
 
-// This message should be sent when:
-// - Immediately after the car initialisation message (complete).
-// - Everytime the shared memory changes (check condition variable)
-// - If delay (ms) has passed since the last message.
+// Function: periodically send status messages to the controller.
 void *send_status_messages(void *arg)
 {
     // Send messages in the form:
@@ -358,7 +359,9 @@ void *send_status_messages(void *arg)
 // - Wait (delay) ms
 // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
 
-// If the current floor and destination floor are equal, call "reached_destination_floor" function.
+// Function: Function thread to move the cars current floor to the destination floor.
+// Arguments: unused void pointer
+// Returns: void
 void *normal_operation(void *arg)
 {
     while (1)
@@ -384,6 +387,9 @@ void *normal_operation(void *arg)
     pthread_exit(NULL);
 }
 
+// Function: Function thread to connect to the controller and receive dispatch floor messages.
+// Arguments: void pointer (unused)
+// Returns: void
 void *connect_to_controller(void *arg)
 {
     controller_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -462,7 +468,8 @@ void *connect_to_controller(void *arg)
     pthread_exit(NULL);
 }
 
-
+// Cleans up the shared memory upon program termination.
+// Returns: void.
 void terminate_shared_memory(int sig_num)
 {
     signal(SIGINT, terminate_shared_memory);
