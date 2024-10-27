@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include "network_utils.h"
 #include "common.h"
+#include <signal.h>
 
 typedef struct
 {
@@ -127,6 +128,8 @@ int main()
         // Check if the message is from a car
         if (strncmp(msg, "CAR", 3) == 0)
         {
+            printf(">>> Car received: %s\n", msg);
+
             car_information new_car;
             sscanf(msg, "CAR %99s %3s %3s", new_car.name, new_car.lowest_floor, new_car.highest_floor); // Parse car info
             new_car.car_fd = clientfd;                                                                  // Set file descriptor for the car
@@ -413,7 +416,6 @@ char *get_and_pop_first_stop(int socket_fd)
             }
 
             free(current); // Free the memory allocated for the removed node
-
             return first_floor; // Return the floor value of the deleted node
         }
         previous = current;
@@ -443,6 +445,8 @@ void *update_call_queue(void *arg)
     free(call_info->source_floor);
     free(call_info->destination_floor);
     free(call_info);
+
+    //print_call_list();
 
     pthread_exit(NULL);
 }

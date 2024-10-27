@@ -18,7 +18,7 @@
 int socket_fd = -1; // Global to allow cleanup in the signal handler
 
 // Functions from network_utils.h
-int establish_connection();
+int establish_connection_client();
 char *receive_msg(int fd);
 void recv_looped(int fd, void *buf, size_t sz);
 void send_message(int fd, const char *buf);
@@ -53,7 +53,7 @@ int main(int argc, char **argv)
     }
 
     // Establish connection and send the first message.
-    socket_fd = establish_connection();
+    socket_fd = establish_connection_client();
     if (socket_fd == -1)
     {
         fprintf(stderr, "Error: Failed to establish connection to the server.\n");
