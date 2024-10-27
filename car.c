@@ -12,11 +12,10 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <signal.h>
-#include "network_utils.h"
-#include "common.h"
 #include <unistd.h>
 #include <time.h>
-#include <sys/time.h>
+#include "network_utils.h"
+#include "common.h"
 
 #define MILLISECOND 1000
 
@@ -24,8 +23,7 @@ char *status_names[] = {
     "Opening", "Open", "Closing", "Closed", "Between"};
 
 // Store the car details:
-typedef struct
-{
+typedef struct {
     char name[100];
     char lowest_floor[4];
     char highest_floor[4];
@@ -41,34 +39,31 @@ int early_exit_delay = 0;
 pthread_mutex_t early_exit_delay_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t delay_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t delay_cond = PTHREAD_COND_INITIALIZER;
-int controller_sock_fd;
 int connection_made = 0;
+int controller_sock_fd;
+volatile sig_atomic_t exit_flag = 0; // For signal handling
 
 // Function definitions:
-void terminate_shared_memory(int sig_num);
+void terminate_shared_memory();
 void *go_through_sequence(void *arg);
 void *handle_button_press(void *arg);
 void *individual_service_mode(void *arg);
 char get_call_direction(const char *source, const char *destination);
 void *connect_to_controller(void *arg);
+void *normal_operation(void *arg);
 void *send_status_messages(void *arg);
 void delay();
 
-int main(int argc, char **argv)
-{
-    if (argc != 5)
-    {
-        printf("Usage: {name} {lowest floor} {highest floor} {delay}\n");
-        exit(1);
+int main(int argc, char **argv) {
+    if (argc != 5) {
+        fprintf(stderr, "Usage: {name} {lowest floor} {highest floor} {delay}\n");
+        exit(EXIT_FAILURE);
     }
 
     signal(SIGINT, terminate_shared_memory);
-
-    // Ensure the car doesn't crash when write fails.
-    signal(SIGPIPE, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN); // Prevent SIGPIPE on write to closed socket
 
     strcat(car_name, argv[1]);
-
     strcpy(car_info.name, argv[1]);
     strcpy(car_info.lowest_floor, argv[2]);
     strcpy(car_info.highest_floor, argv[3]);
@@ -78,43 +73,38 @@ int main(int argc, char **argv)
     shm_unlink(car_name);
 
     shm_fd = shm_open(car_name, O_CREAT | O_RDWR, 0666);
-    if (shm_fd == -1)
-    {
+    if (shm_fd == -1) {
         perror("shm_open");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    if (ftruncate(shm_fd, sizeof(car_shared_mem)) == -1)
-    {
+    if (ftruncate(shm_fd, sizeof(car_shared_mem)) == -1) {
         perror("ftruncate");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     shared_mem = mmap(0, sizeof(car_shared_mem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (shared_mem == MAP_FAILED)
-    {
+    if (shared_mem == MAP_FAILED) {
         perror("mmap");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    // Initialize the mutex.
+    // Initialize the mutex and condition variable with process-shared attributes.
     pthread_mutexattr_t mutattr;
-    pthread_mutexattr_init(&mutattr);
-    pthread_mutexattr_setpshared(&mutattr, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(&shared_mem->mutex, &mutattr);
-    pthread_mutexattr_destroy(&mutattr);
-
-    // Initialize the condition variable.
     pthread_condattr_t condattr;
+    pthread_mutexattr_init(&mutattr);
     pthread_condattr_init(&condattr);
+    pthread_mutexattr_setpshared(&mutattr, PTHREAD_PROCESS_SHARED);
     pthread_condattr_setpshared(&condattr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&shared_mem->mutex, &mutattr);
     pthread_cond_init(&shared_mem->cond, &condattr);
+    pthread_mutexattr_destroy(&mutattr);
     pthread_condattr_destroy(&condattr);
 
-    // Initialize the shared memory.
+    // Initialize shared memory
     strcpy(shared_mem->current_floor, argv[2]);
     strcpy(shared_mem->destination_floor, argv[2]);
-    strcpy(shared_mem->status, status_names[3]); // Initially "Closed"
+    strcpy(shared_mem->status, status_names[3]); // "Closed"
     shared_mem->open_button = 0;
     shared_mem->close_button = 0;
     shared_mem->door_obstruction = 0;
@@ -123,51 +113,39 @@ int main(int argc, char **argv)
     shared_mem->individual_service_mode = 0;
     shared_mem->emergency_mode = 0;
 
-    // Create handle button press thread
-    pthread_t button_thread;
-    if (pthread_create(&button_thread, NULL, handle_button_press, NULL) != 0)
-    {
-        perror("pthread_create() for button press");
-        exit(EXIT_FAILURE);
-    }
+    // Create threads
+    pthread_t threads[5];
+    pthread_create(&threads[0], NULL, handle_button_press, NULL);
+    pthread_create(&threads[1], NULL, go_through_sequence, NULL);
+    pthread_create(&threads[2], NULL, individual_service_mode, NULL);
+    pthread_create(&threads[3], NULL, connect_to_controller, NULL);
+    pthread_create(&threads[4], NULL, normal_operation, NULL);
+    pthread_create(&threads[5], NULL, send_status_messages, NULL);
 
-    // Handle the car state thread
-    pthread_t go_through_sequence_thread;
-    if (pthread_create(&go_through_sequence_thread, NULL, go_through_sequence, NULL) != 0)
-    {
-        perror("pthread_create() for sequence thread");
-        exit(EXIT_FAILURE);
+    for (int i = 0; i < 6; i++) {
+        pthread_join(threads[i], NULL);
     }
-
-    pthread_t individual_service_mode_thread;
-    if (pthread_create(&individual_service_mode_thread, NULL, individual_service_mode, NULL) != 0)
-    {
-        perror("pthread_create() for individual service mode thread.");
-        exit(EXIT_FAILURE);
-    }
-
-    pthread_t connect_to_controller_thread;
-    if (pthread_create(&connect_to_controller_thread, NULL, connect_to_controller, NULL) != 0)
-    {
-        perror("pthread_create() for individual service mode thread.");
-        exit(EXIT_FAILURE);
-    }
-
-    pthread_t status_messages_thread;
-    if (pthread_create(&status_messages_thread, NULL, send_status_messages, NULL) != 0)
-    {
-        perror("pthread_create() for individual service mode thread.");
-        exit(EXIT_FAILURE);
-    }
-    pthread_join(status_messages_thread, NULL);
-    pthread_join(connect_to_controller_thread, NULL);
-    pthread_join(button_thread, NULL);
-    pthread_join(individual_service_mode_thread, NULL);
-    pthread_join(go_through_sequence_thread, NULL);
 
     return 0;
 }
 
+// Cleanup function for shared memory
+void terminate_shared_memory() {
+    if (exit_flag) return; // Prevent multiple invocations
+    exit_flag = 1; // Set exit flag
+
+    // Cleanup resources
+    if (shared_mem) {
+        munmap(shared_mem, sizeof(car_shared_mem));
+    }
+    if (shm_fd != -1) {
+        close(shm_fd);
+        shm_unlink(car_name);
+    }
+    exit(EXIT_SUCCESS);
+}
+
+// Function: handles operations for individual service mode.
 void *individual_service_mode(void *arg)
 {
     while (1)
@@ -203,6 +181,7 @@ void *individual_service_mode(void *arg)
     pthread_exit(NULL);
 }
 
+// Function: updates the car's status based on the button presses.
 void *handle_button_press(void *arg)
 {
     while (1)
@@ -249,6 +228,7 @@ void *handle_button_press(void *arg)
     pthread_exit(NULL);
 }
 
+// Function: state machine for status. Attempt to get the car's status to closed, and react to changes from external programs.
 void *go_through_sequence(void *arg)
 {
     (void)arg;
@@ -293,6 +273,7 @@ void *go_through_sequence(void *arg)
     pthread_exit(NULL);
 }
 
+// Function: delay mechanism that utilizes pthread_cond_timedwait for absolute delays.
 void delay()
 {
     struct timespec ts;
@@ -316,7 +297,7 @@ void delay()
         pthread_mutex_lock(&early_exit_delay_mutex);
         if (early_exit_delay)
         {
-            early_exit_delay = 1;
+            early_exit_delay = 0;
             pthread_mutex_unlock(&early_exit_delay_mutex);
             pthread_mutex_unlock(&delay_mutex);
             return; // Exit early
@@ -332,6 +313,10 @@ void delay()
     pthread_mutex_unlock(&delay_mutex);
 }
 
+// Send messages in the form:
+// STATUS {status} {current floor} {destination floor}
+
+// Function: periodically send status messages to the controller.
 void *send_status_messages(void *arg)
 {
     // Send messages in the form:
@@ -349,7 +334,7 @@ void *send_status_messages(void *arg)
 
             pthread_mutex_unlock(&shared_mem->mutex);
             send_message(controller_sock_fd, status_message);
-        }
+        }   
     }
 
     // This message should be sent when:
@@ -362,12 +347,17 @@ void *send_status_messages(void *arg)
 // - Change its status to Between
 // - Wait (delay) ms
 // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+
+// Function: Function thread to move the cars current floor to the destination floor.
+// Arguments: unused void pointer
+// Returns: void
 void *normal_operation(void *arg)
 {
     while (1)
     {
         pthread_mutex_lock(&shared_mem->mutex);
         pthread_cond_wait(&shared_mem->cond, &shared_mem->mutex);
+
         if (strcmp(shared_mem->destination_floor, shared_mem->current_floor) != 0)
         {
             if (strcmp(shared_mem->status, "Closed") == 0)
@@ -375,16 +365,38 @@ void *normal_operation(void *arg)
                 strcpy(shared_mem->status, "Between");
                 pthread_cond_broadcast(&shared_mem->cond);
 
+                pthread_mutex_unlock(&shared_mem->mutex);  // Unlock while performing delay
                 delay();
+                pthread_mutex_lock(&shared_mem->mutex);    // Re-lock after delay
 
-                // - Change its current floor to be 1 closer to the destination floor, and its status to Closed
+                // Update the current floor to be one closer to the destination floor
+                int current_floor = atoi(shared_mem->current_floor);
+                int destination_floor = atoi(shared_mem->destination_floor);
+
+                if (current_floor < destination_floor)
+                {
+                    current_floor++;
+                }
+                else if (current_floor > destination_floor)
+                {
+                    current_floor--;
+                }
+
+                snprintf(shared_mem->current_floor, sizeof(shared_mem->current_floor), "%d", current_floor);
+                strcpy(shared_mem->status, "Closed");
+                pthread_cond_broadcast(&shared_mem->cond);
             }
         }
+
         pthread_mutex_unlock(&shared_mem->mutex);
     }
+
     pthread_exit(NULL);
 }
 
+// Function: Function thread to connect to the controller and receive dispatch floor messages.
+// Arguments: void pointer (unused)
+// Returns: void
 void *connect_to_controller(void *arg)
 {
     controller_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -463,17 +475,4 @@ void *connect_to_controller(void *arg)
     close(controller_sock_fd);
 
     pthread_exit(NULL);
-}
-
-void terminate_shared_memory(int sig_num)
-{
-    signal(SIGINT, terminate_shared_memory);
-
-    munmap(shared_mem, sizeof(car_shared_mem));
-
-    close(shm_fd);
-
-    shm_unlink(car_name);
-
-    exit(0);
 }
