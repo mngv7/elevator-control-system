@@ -337,6 +337,9 @@ void *handle_car(void *arg)
     pthread_exit(NULL);
 }
 
+// Function: Retrieves and removes the first stop assigned to the specified car.
+// Argument: socket_fd - the file descriptor for the car requesting the stop.
+// Returns: A pointer to the floor string of the stop, or "E" if no stop is found or the list is empty.
 char *get_and_pop_first_stop(int socket_fd)
 {
     if (call_list_head == NULL)
@@ -349,6 +352,7 @@ char *get_and_pop_first_stop(int socket_fd)
 
     while (current != NULL)
     {
+        // Check if the current call is assigned to the requested car
         if (current->call.assigned_car_fd == socket_fd)
         {
             char *first_floor = malloc(strlen(current->call.floor) + 1);
@@ -358,6 +362,7 @@ char *get_and_pop_first_stop(int socket_fd)
             }
             strcpy(first_floor, current->call.floor);
 
+            // Remove the node from the linked list
             if (previous == NULL)
             {
                 call_list_head = call_list_head->next;
@@ -367,7 +372,8 @@ char *get_and_pop_first_stop(int socket_fd)
                 previous->next = current->next;
             }
 
-            free(current);
+            free(current); // Free the memory allocated for the removed node
+
             return first_floor; // Return the floor value of the deleted node
         }
         previous = current;
@@ -377,10 +383,14 @@ char *get_and_pop_first_stop(int socket_fd)
     return "E"; // Return "E" if no matching FD was found
 }
 
+// Function: Updates the call queue with source and destination floor requests.
+// Argument: A void pointer that is cast to a CallInfo pointer.
+// Returns: void
 void *update_call_queue(void *arg)
 {
     CallInfo *call_info = (CallInfo *)arg;
 
+    // Create call requests for source and destination
     call_requests source_call = {get_call_direction(call_info->source_floor, call_info->destination_floor), "", call_info->chosen_car_fd};
     strcpy(source_call.floor, call_info->source_floor);
     add_call_request(source_call);
@@ -389,15 +399,20 @@ void *update_call_queue(void *arg)
     strcpy(destination_call.floor, call_info->destination_floor);
     add_call_request(destination_call);
 
+    // Free allocated memory for floor strings and CallInfo structure
     free(call_info->source_floor);
     free(call_info->destination_floor);
     free(call_info);
 
-    //print_call_list();
-
     pthread_exit(NULL);
 }
 
+
+// Function: takes a call and adds it to the queue ensuring floors of the same direction
+// are together, while have D floors in descending order and U floors in ascending.
+// Arguments:
+// new_call - a struct containing the floor, direction, and assigned car.
+// Returns: void.
 void add_call_request(call_requests new_call)
 {
     CallNode *new_node = malloc(sizeof(CallNode));
@@ -521,6 +536,9 @@ void add_call_request(call_requests new_call)
     pthread_mutex_unlock(&call_list_mutex);
 }
 
+// Function: Adds a new car the to car linked list.
+// Arguments: new_car - struct containing important information about the available cars.
+// Returns: void.
 void add_car_to_list(car_information new_car)
 {
     pthread_mutex_lock(&car_list_mutex);
@@ -541,6 +559,9 @@ void add_car_to_list(car_information new_car)
     pthread_mutex_unlock(&car_list_mutex);
 }
 
+// Function: Removes a car from the car linked list.
+// Arguments: car_fd - the file descriptor for the car to be removed.
+// Returns: void
 void remove_car_from_list(int car_fd)
 {
     pthread_mutex_lock(&car_list_mutex);
@@ -548,14 +569,14 @@ void remove_car_from_list(int car_fd)
     CarNode *current = car_list_head;
     CarNode *prev = NULL;
 
+    // Loop through the car linked list
     while (current != NULL)
     {
+        // If found a matching car.
         if (current->car_info.car_fd == car_fd)
         {
-            // Remove the car node from the list
             if (prev == NULL)
             {
-                // Car is at the head of the list
                 car_list_head = current->next;
             }
             else
@@ -570,29 +591,4 @@ void remove_car_from_list(int car_fd)
     }
 
     pthread_mutex_unlock(&car_list_mutex);
-}
-
-void print_car_list()
-{
-    pthread_mutex_lock(&car_list_mutex);
-    for (CarNode *curr = car_list_head; curr != NULL; curr = curr->next)
-    {
-        printf("Car Name: %s, Lowest Floor: %s, Highest Floor: %s\n",
-               curr->car_info.name,
-               curr->car_info.lowest_floor,
-               curr->car_info.highest_floor);
-    }
-    pthread_mutex_unlock(&car_list_mutex);
-}
-
-void print_call_list()
-{
-    printf("========= Call List =========\n");
-        pthread_mutex_lock(&call_list_mutex);
-    for (CallNode *curr = call_list_head; curr != NULL; curr = curr->next)
-    {
-        printf("Call Direction: %c, Floor: %s\n", curr->call.direction, curr->call.floor);
-    }
-    pthread_mutex_unlock(&call_list_mutex);
-    printf("=============================\n");
 }
